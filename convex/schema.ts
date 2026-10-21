@@ -17,7 +17,9 @@ export default defineSchema({
     topicId: v.id("topics"),
     kind: mapKind,
     finishedAt: v.optional(v.number()),
-  }).index("by_topic_kind", ["topicId", "kind"]),
+  })
+    .index("by_topic_kind", ["topicId", "kind"])
+    .index("by_topic_kind_finished", ["topicId", "kind", "finishedAt"]),
 
   nodes: defineTable({
     mapId: v.id("maps"),

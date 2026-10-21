@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { demoNotes, demoReferenceTree, demoTopic, type SeedNode } from "./seedData";
 
@@ -13,15 +13,21 @@ export const get = query({
       .query("maps")
       .withIndex("by_topic_kind", (q) => q.eq("topicId", topic._id).eq("kind", "reference"))
       .first();
-    const recall = await ctx.db
+    const inProgress = await inProgressRecall(ctx, topic._id);
+    const finished = await ctx.db
       .query("maps")
-      .withIndex("by_topic_kind", (q) => q.eq("topicId", topic._id).eq("kind", "recall"))
+      .withIndex("by_topic_kind_finished", (q) =>
+        q.eq("topicId", topic._id).eq("kind", "recall").gt("finishedAt", 0),
+      )
       .order("desc")
       .first();
     return {
       topic,
       referenceMapId: reference?._id ?? null,
-      recallMapId: recall && !recall.finishedAt ? recall._id : null,
+      /** The recall attempt being worked on, if any. */
+      recallMapId: inProgress?._id ?? null,
+      /** The most recently finished attempt, shown in Compare. */
+      resultMapId: finished?._id ?? null,
     };
   },
 });
@@ -44,12 +50,8 @@ export const seed = mutation({
 export const startRecall = mutation({
   args: { topicId: v.id("topics") },
   handler: async (ctx, { topicId }) => {
-    const latest = await ctx.db
-      .query("maps")
-      .withIndex("by_topic_kind", (q) => q.eq("topicId", topicId).eq("kind", "recall"))
-      .order("desc")
-      .first();
-    if (latest && !latest.finishedAt) return latest._id;
+    const inProgress = await inProgressRecall(ctx, topicId);
+    if (inProgress) return inProgress._id;
 
     const topic = await ctx.db.get(topicId);
     if (!topic) throw new ConvexError("Topic not found");
@@ -59,6 +61,44 @@ export const startRecall = mutation({
     return mapId;
   },
 });
+
+/** Locks an in-progress recall attempt so it can be compared. */
+export const finishRecall = mutation({
+  args: { mapId: v.id("maps") },
+  handler: async (ctx, { mapId }) => {
+    const map = await ctx.db.get(mapId);
+    if (!map || map.kind !== "recall") throw new ConvexError("Recall attempt not found");
+    if (!map.finishedAt) await ctx.db.patch(mapId, { finishedAt: Date.now() });
+  },
+});
+
+/** Deletes an in-progress recall attempt. */
+export const abandonRecall = mutation({
+  args: { mapId: v.id("maps") },
+  handler: async (ctx, { mapId }) => {
+    const map = await ctx.db.get(mapId);
+    if (!map) return;
+    if (map.kind !== "recall" || map.finishedAt) {
+      throw new ConvexError("Only a recall attempt in progress can be abandoned");
+    }
+    const nodes = await ctx.db
+      .query("nodes")
+      .withIndex("by_map_key", (q) => q.eq("mapId", mapId))
+      .collect();
+    for (const node of nodes) await ctx.db.delete(node._id);
+    await ctx.db.delete(mapId);
+  },
+});
+
+/** The topic's recall attempt in progress (there's at most one). */
+function inProgressRecall(ctx: QueryCtx, topicId: Id<"topics">) {
+  return ctx.db
+    .query("maps")
+    .withIndex("by_topic_kind_finished", (q) =>
+      q.eq("topicId", topicId).eq("kind", "recall").eq("finishedAt", undefined),
+    )
+    .first();
+}
 
 async function insertTree(
   ctx: MutationCtx,

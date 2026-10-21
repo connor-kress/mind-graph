@@ -41,9 +41,9 @@ export const apply = mutation({
     if (upserts.length + removes.length > MAX_BATCH) {
       throw new ConvexError("Too many changes at once");
     }
-    if (!(await ctx.db.get(mapId))) {
-      throw new ConvexError("Map not found");
-    }
+    const map = await ctx.db.get(mapId);
+    if (!map) throw new ConvexError("Map not found");
+    if (map.finishedAt) throw new ConvexError("This recall attempt is finished");
     const upsertKeys = new Set(upserts.map((n) => n.key));
     if (upsertKeys.size !== upserts.length || removes.some((key) => upsertKeys.has(key))) {
       throw new ConvexError("Each node can only change once per batch");

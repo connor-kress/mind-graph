@@ -1,7 +1,9 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { memo, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MAX_LABEL_LENGTH } from "../../convex/model";
+import { onCommitEdits } from "./commitEdits";
 import { useEditor, type CommitVia } from "./EditorContext";
+import { NODE_BASE } from "./nodeStyle";
 
 export type MindNodeData = {
   label: string;
@@ -20,8 +22,9 @@ const PLACEHOLDER = "New node";
 
 function nodeClasses(data: MindNodeData) {
   const classes = [
-    "mind-node group relative w-max min-w-[7.5rem] max-w-[15rem] rounded-md border px-3.5 py-2",
-    "text-[15px] leading-snug transition-[box-shadow,background-color,border-color] duration-150",
+    "mind-node",
+    NODE_BASE,
+    "transition-[box-shadow,background-color,border-color] duration-150",
   ];
   if (data.dropTarget) {
     classes.push("border-dashed border-blue-600 bg-blue-50 text-neutral-900");
@@ -66,7 +69,16 @@ function MindNodeView({ id, data }: NodeProps<MindFlowNode>) {
           {data.label || <span className="italic text-blue-700/70">{PLACEHOLDER}</span>}
         </div>
       )}
-      {data.variant !== "floating" && (
+      {/* Always rendered: React Flow only measures handles when a node resizes,
+          so one added when a floating node is linked would never get edges. */}
+      {data.variant === "floating" ? (
+        <Handle
+          type="source"
+          position={Position.Right}
+          isConnectable={false}
+          className="anchor-handle"
+        />
+      ) : (
         <Handle
           type="source"
           position={Position.Right}
@@ -106,6 +118,11 @@ function LabelEditor({ nodeKey, initial }: { nodeKey: string; initial: string })
     done.current = true;
     actions.commitEdit(nodeKey, value, via);
   };
+
+  // Commit when the app is about to switch views (e.g. "Finish and compare").
+  const finishRef = useRef(finish);
+  finishRef.current = finish;
+  useEffect(() => onCommitEdits(() => finishRef.current("blur")), []);
 
   return (
     <div className="relative">

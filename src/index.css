@@ -53,13 +53,19 @@ body {
   stroke-dasharray: 5 4;
 }
 
-.react-flow__edge.edge-old .react-flow__edge-path {
+/* Keep a hovered compare node's note above its neighbours. */
+.react-flow__node-compare:hover {
+  z-index: 1000 !important;
+}
+
+.react-flow__edge.edge-old .react-flow__edge-path,
+.react-flow__edge.edge-missed .react-flow__edge-path {
   stroke: var(--color-neutral-400);
   stroke-dasharray: 5 4;
 }
 
 /* Edge anchors: invisible, but where edges attach. */
-.mind-node .anchor-handle,
+.anchor-handle,
 .mind-node .branch-handle {
   width: 10px;
   height: 10px;
@@ -70,7 +76,7 @@ body {
   border-radius: 9999px;
 }
 
-.mind-node .anchor-handle {
+.anchor-handle {
   opacity: 0;
   pointer-events: none;
 }
