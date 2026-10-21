@@ -488,8 +488,9 @@ function Editor({ mapId, vim }: Props) {
       reselectAfterHistory(letter === "y" || e.shiftKey ? redo() : undo());
       return;
     }
-    // Vim mode also undoes with u and redoes with Ctrl+R (instead of reloading).
-    if (vim && !e.altKey && !e.shiftKey && !e.metaKey && letter === (e.ctrlKey ? "r" : "u")) {
+    // Vim mode also undoes with u and redoes with Ctrl+R, while a node is
+    // selected (otherwise Ctrl+R reloads the page as usual).
+    if (vim && selectedNode && !e.altKey && !e.shiftKey && !e.metaKey && letter === (e.ctrlKey ? "r" : "u")) {
       e.preventDefault();
       reselectAfterHistory(e.ctrlKey ? redo() : undo());
       return;
