@@ -397,6 +397,19 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
 
   // ---- Keyboard -----------------------------------------------------------
 
+  // The child last selected (or holding the selection) under each node, so
+  // ArrowRight retraces the way back after ArrowLeft.
+  const lastChild = useRef(new Map<string, string>());
+  useEffect(() => {
+    let key = selectedKey;
+    while (key && tree.depth.has(key)) {
+      const parentKey = allNodes.get(key)?.parentKey;
+      if (!parentKey) break;
+      lastChild.current.set(parentKey, key);
+      key = parentKey;
+    }
+  }, [selectedKey, allNodes, tree]);
+
   const navigate = (key: string, direction: string) => {
     const node = allNodes.get(key);
     if (!node || !tree.depth.has(key)) return;
@@ -408,6 +421,11 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
       if (node.parentKey) setSelected(node.parentKey);
     } else if (direction === "ArrowRight") {
       const kids = tree.children.get(key) ?? [];
+      const last = lastChild.current.get(key);
+      if (last && kids.some((kid) => kid.key === last)) {
+        setSelected(last);
+        return;
+      }
       const y = center(key);
       const closest = kids.reduce<MapNode | undefined>(
         (best, kid) =>
