@@ -18,9 +18,10 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { BranchLine } from "./BranchLine";
 import { EditorContext, type EditorActions, type EditorContextValue } from "./EditorContext";
 import { ESTIMATED_SIZE, layoutTree } from "./layout";
-import { MindNode, type MindFlowNode } from "./MindNode";
+import { MindNode, type Caret, type MindFlowNode } from "./MindNode";
 import { menuItems, type MenuItem } from "./menu";
 import { NodeMenu } from "./NodeMenu";
+import { isTextInput } from "./isTextInput";
 import { ShortcutHints } from "./ShortcutHints";
 import {
   buildTree,
@@ -55,22 +56,33 @@ function clientPoint(e: MouseEvent | TouchEvent | React.MouseEvent) {
   return "changedTouches" in e ? e.changedTouches[0] : e;
 }
 
-function isTextInput(target: EventTarget | null) {
-  return (
-    target instanceof HTMLElement &&
-    (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
-  );
-}
+/** Vim mode's keys for each arrow key. */
+const VIM_KEYS: Record<string, string> = {
+  h: "ArrowLeft",
+  j: "ArrowDown",
+  k: "ArrowUp",
+  l: "ArrowRight",
+};
 
-export function MapEditor({ mapId }: { mapId: Id<"maps"> }) {
+/** Vim mode's keys for editing a label: i retypes it, I and A edit at either end, S clears it. */
+const VIM_EDIT_KEYS: Record<string, Caret> = { i: "all" };
+const VIM_SHIFT_EDIT_KEYS: Record<string, Caret> = { i: "start", a: "end", s: "clear" };
+
+type Props = {
+  mapId: Id<"maps">;
+  /** Navigate with h, j, k, and l instead of the arrow keys, and edit with i. */
+  vim: boolean;
+};
+
+export function MapEditor(props: Props) {
   return (
     <ReactFlowProvider>
-      <Editor mapId={mapId} />
+      <Editor {...props} />
     </ReactFlowProvider>
   );
 }
 
-function Editor({ mapId }: { mapId: Id<"maps"> }) {
+function Editor({ mapId, vim }: Props) {
   const { nodes, apply, undo, redo, saveError, dismissError } = useMapDoc(mapId);
   const flow = useReactFlow<MindFlowNode>();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -85,6 +97,11 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
   const [sizes, setSizes] = useState(() => new Map<string, Size>());
   const [selected, setSelected] = useState<string | null>(null);
   const [editingState, setEditing] = useState<string | null>(null);
+  const [caret, setCaret] = useState<Caret>("all");
+  const startEditing = (key: string, at: Caret = "all") => {
+    setCaret(at);
+    setEditing(key);
+  };
   const [draft, setDraft] = useState<MapNode | null>(null);
   const [linkingState, setLinkingState] = useState<string | null>(null);
   const [branching, setBranchingState] = useState<string | null>(null);
@@ -132,7 +149,9 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
   const menuNode = menuState ? allNodes.get(menuState.key) : undefined;
   const menuChildCount = menuState ? (tree.children.get(menuState.key)?.length ?? 0) : 0;
   const menuEntries =
-    menuState && menuNode ? menuItems(menuChildCount, menuNode.isRoot, menuState.withRename) : [];
+    menuState && menuNode
+      ? menuItems(menuChildCount, menuNode.isRoot, menuState.withRename, vim)
+      : [];
   const menu =
     menuState && menuEntries.length
       ? { ...menuState, active: Math.min(menuState.active, menuEntries.length - 1) }
@@ -227,7 +246,10 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
     apply({ upserts: placeAmongSiblings(tree, parentKey, [node], index), removes: [] }, key);
   };
 
-  const startChildDraft = (parentKey: string, index?: number, spawn?: XY) => {
+  // Where the selection goes back to if the draft is left empty.
+  const draftFrom = useRef<string | null>(null);
+  const startChildDraft = (parentKey: string, index?: number, spawn?: XY, from = parentKey) => {
+    draftFrom.current = from;
     const siblings = (tree.children.get(parentKey) ?? []).filter((n) => n.key !== draft?.key);
     const i = index ?? siblings.length;
     const before = siblings[i - 1]?.order ?? (siblings[i] ? siblings[i].order - 1 : -1);
@@ -235,7 +257,7 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
     const key = newKey();
     if (spawn) spawnHints.current.set(key, spawn);
     setDraft({ key, label: "", parentKey, order: (before + after) / 2, isRoot: false });
-    setEditing(key);
+    startEditing(key);
     setSelected(key);
     setLinking(null);
   };
@@ -244,19 +266,22 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
     const key = newKey();
     const x = grid ? snap(at.x - 20) : at.x - 20;
     const y = grid ? snap(at.y - 18) : at.y - 18;
+    draftFrom.current = null;
     setDraft({ key, label: "", order: 0, isRoot: false, x, y });
-    setEditing(key);
+    startEditing(key);
     setSelected(key);
     setLinking(null);
   };
 
-  const addSibling = (key: string) => {
+  /** Starts a sibling below the node, or above it. The root gets a last (or first) child. */
+  const addSibling = (key: string, above = false) => {
     const node = allNodes.get(key);
     if (!node) return;
-    if (node.isRoot) return startChildDraft(key);
+    if (node.isRoot) return startChildDraft(key, above ? 0 : undefined);
     if (!node.parentKey || !tree.depth.has(key)) return;
     const siblings = tree.children.get(node.parentKey) ?? [];
-    startChildDraft(node.parentKey, siblings.findIndex((n) => n.key === key) + 1);
+    const index = siblings.findIndex((n) => n.key === key) + (above ? 0 : 1);
+    startChildDraft(node.parentKey, index, undefined, key);
   };
 
   const remove = (key: string, mode: MenuItem["id"]) => {
@@ -321,7 +346,7 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
     if (item.id === "rename") {
       setMenu(null);
       setSelected(menu.key);
-      setEditing(menu.key);
+      startEditing(menu.key);
     } else {
       remove(menu.key, item.id);
     }
@@ -344,7 +369,7 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
       if (draft && key === draft.key) {
         setDraft(null);
         if (!label) {
-          setSelected(draft.parentKey ?? null);
+          setSelected(draftFrom.current);
           return;
         }
         const node = { ...draft, label };
@@ -371,17 +396,12 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
       }
       const node = nodes?.get(key);
       if (!node) return;
-      if (label && label !== node.label) {
+      // Emptying a label deletes the node, moving its children up (not the root's).
+      if (!label) return remove(key, "relink");
+      if (label !== node.label) {
         apply({ upserts: [{ ...node, label }], removes: [] }, key);
       }
       if (via === "tab" && tree.depth.has(key)) startChildDraft(key);
-    },
-    cancelEdit: (key) => {
-      setEditing(null);
-      if (draft && key === draft.key) {
-        setDraft(null);
-        setSelected(draft.parentKey ?? null);
-      }
     },
   };
   // Nodes get a stable object that forwards to the latest actions.
@@ -390,7 +410,6 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
   const stableActions = useMemo<EditorActions>(
     () => ({
       commitEdit: (...args) => actionsRef.current.commitEdit(...args),
-      cancelEdit: (...args) => actionsRef.current.cancelEdit(...args),
     }),
     [],
   );
@@ -421,6 +440,8 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
       if (node.parentKey) setSelected(node.parentKey);
     } else if (direction === "ArrowRight") {
       const kids = tree.children.get(key) ?? [];
+      // Past the end of a branch, start a child.
+      if (kids.length === 0) return startChildDraft(key);
       const last = lastChild.current.get(key);
       if (last && kids.some((kid) => kid.key === last)) {
         setSelected(last);
@@ -467,22 +488,32 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
       reselectAfterHistory(letter === "y" || e.shiftKey ? redo() : undo());
       return;
     }
+    // Vim mode also undoes with u and redoes with Ctrl+R (instead of reloading).
+    if (vim && !e.altKey && !e.shiftKey && !e.metaKey && letter === (e.ctrlKey ? "r" : "u")) {
+      e.preventDefault();
+      reselectAfterHistory(e.ctrlKey ? redo() : undo());
+      return;
+    }
     // Holding a key down shouldn't spawn, delete, or pick a stream of things.
-    if (e.repeat && ["Tab", "Enter", "Delete", "Backspace"].includes(e.key)) {
+    // Vim mode deletes with d rather than Delete or Backspace.
+    const isDeleteKey = vim ? letter === "d" : e.key === "Delete" || e.key === "Backspace";
+    if (e.repeat && (isDeleteKey || ["Tab", "Enter"].includes(e.key))) {
       e.preventDefault();
       return;
     }
     if (mod) return;
+    // The arrow key pressed, or its stand-in in vim mode.
+    const arrow = vim ? !e.shiftKey && VIM_KEYS[letter] : e.key.startsWith("Arrow") && e.key;
 
     if (menu) {
       const items = menuEntries;
       e.preventDefault();
       if (e.key === "Escape") setMenu(null);
-      else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        const step = e.key === "ArrowDown" ? 1 : -1;
+      else if (arrow === "ArrowDown" || arrow === "ArrowUp") {
+        const step = arrow === "ArrowDown" ? 1 : -1;
         setMenu({ ...menu, active: (menu.active + step + items.length) % items.length });
       } else if (e.key === "Enter" && items[menu.active]) chooseMenuItem(items[menu.active]);
-      else if (e.key === "Delete" || e.key === "Backspace") {
+      else if (isDeleteKey) {
         remove(menu.key, e.shiftKey ? "withChildren" : e.altKey ? "floating" : "relink");
       }
       return;
@@ -490,7 +521,8 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
 
     if (e.key === "Escape") {
       if (linking) setLinking(null);
-      else setSelected(null);
+      // In vim mode, Esc is pressed out of habit, so it keeps the selection.
+      else if (!vim) setSelected(null);
       return;
     }
     if (letter === "g" && !e.altKey) {
@@ -498,9 +530,12 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
       return;
     }
 
-    const isNavKey = ["Tab", "Enter", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(
-      e.key,
-    );
+    // Vim mode adds siblings with o rather than Enter.
+    // Shift adds it above.
+    const isSiblingKey = vim ? letter === "o" && !e.altKey : e.key === "Enter";
+    // Vim mode starts children with l only.
+    const isChildKey = !vim && e.key === "Tab";
+    const isNavKey = !!arrow || isSiblingKey || isChildKey || e.key === "Enter";
     if (!selectedNode) {
       if (isNavKey && tree.root) {
         e.preventDefault();
@@ -509,36 +544,43 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
       return;
     }
     const sel = selectedNode.key;
+    if (arrow) {
+      e.preventDefault();
+      if (e.altKey && (arrow === "ArrowUp" || arrow === "ArrowDown")) {
+        reorder(sel, arrow === "ArrowUp" ? -1 : 1);
+      } else {
+        navigate(sel, arrow);
+      }
+      return;
+    }
+    if (isDeleteKey) {
+      e.preventDefault();
+      requestDelete(sel, e);
+      return;
+    }
+    if (isSiblingKey && !isLoose(sel)) {
+      e.preventDefault();
+      addSibling(sel, e.shiftKey);
+      return;
+    }
+    const editAt = (e.shiftKey ? VIM_SHIFT_EDIT_KEYS : VIM_EDIT_KEYS)[letter];
+    if (vim && !e.altKey && editAt) {
+      e.preventDefault();
+      startEditing(sel, editAt);
+      return;
+    }
     switch (e.key) {
       case "Tab":
         e.preventDefault();
-        if (tree.depth.has(sel)) startChildDraft(sel);
+        if (isChildKey && tree.depth.has(sel)) startChildDraft(sel);
         break;
       case "Enter":
         e.preventDefault();
-        if (isLoose(sel)) {
-          if (linking !== sel) setLinking(sel);
-        } else addSibling(sel);
+        if (isLoose(sel) && linking !== sel) setLinking(sel);
         break;
       case "F2":
         e.preventDefault();
-        setEditing(sel);
-        break;
-      case "Delete":
-      case "Backspace":
-        e.preventDefault();
-        requestDelete(sel, e);
-        break;
-      case "ArrowUp":
-      case "ArrowDown":
-      case "ArrowLeft":
-      case "ArrowRight":
-        e.preventDefault();
-        if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-          reorder(sel, e.key === "ArrowUp" ? -1 : 1);
-        } else {
-          navigate(sel, e.key);
-        }
+        startEditing(sel);
         break;
     }
   };
@@ -714,6 +756,7 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
         draft: isDraft,
         selected: node.key === selectedKey,
         editing: node.key === editing,
+        caret: node.key === editing ? caret : "all",
         dropTarget: node.key === dropTarget,
         deleteAffected: affected.has(node.key),
         dragging: drag?.key === node.key,
@@ -809,7 +852,7 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
           }}
           onNodeDoubleClick={(_e, node) => {
             setSelected(node.id);
-            setEditing(node.id);
+            startEditing(node.id);
           }}
           onNodeContextMenu={(e, node) => {
             // Keep the native menu (paste, spelling) while editing a label.
@@ -878,11 +921,7 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
           <NodeMenu
             x={menu.x}
             y={menu.y}
-            title={
-              menuChildCount
-                ? `“${menuNode.label}” has ${menuChildCount} ${menuChildCount === 1 ? "child" : "children"}`
-                : `“${menuNode.label}”`
-            }
+            label={`“${menuNode.label}”`}
             items={menuEntries}
             active={menu.active}
             onHover={(active) => setMenu({ ...menu, active })}
@@ -893,6 +932,7 @@ function Editor({ mapId }: { mapId: Id<"maps"> }) {
         <ShortcutHints
           grid={grid}
           linking={!!linking}
+          vim={vim}
           looseSelected={!!selectedKey && isLoose(selectedKey)}
         />
 

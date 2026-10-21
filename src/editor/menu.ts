@@ -6,17 +6,24 @@ export type MenuItem = {
   keys: string[];
 };
 
-export function menuItems(childCount: number, isRoot: boolean, includeRename: boolean) {
+export function menuItems(
+  childCount: number,
+  isRoot: boolean,
+  includeRename: boolean,
+  vim: boolean,
+) {
   const items: MenuItem[] = [];
-  if (includeRename) items.push({ id: "rename", label: "Rename", keys: ["F2"] });
+  const del = vim ? "d" : "Del";
+  if (includeRename) items.push({ id: "rename", label: "Rename", keys: [vim ? "i" : "F2"] });
   if (isRoot) return items;
   if (childCount === 0) {
-    items.push({ id: "delete", label: "Delete node", keys: ["Del"] });
+    items.push({ id: "delete", label: "Delete node", keys: [del] });
   } else {
     items.push(
-      { id: "relink", label: "Relink children to parent", keys: ["Del"] },
-      { id: "withChildren", label: "Delete with children", keys: ["Shift", "Del"] },
-      { id: "floating", label: "Leave children floating", keys: ["Alt", "Del"] },
+      // The first press opens this menu; the second picks it.
+      { id: "relink", label: "Relink children to parent", keys: [del, del] },
+      { id: "withChildren", label: "Delete with children", keys: ["Shift", del] },
+      { id: "floating", label: "Leave children floating", keys: ["Alt", del] },
     );
   }
   return items;

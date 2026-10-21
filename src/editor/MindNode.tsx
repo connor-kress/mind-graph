@@ -5,12 +5,19 @@ import { onCommitEdits } from "./commitEdits";
 import { useEditor, type CommitVia } from "./EditorContext";
 import { NODE_BASE } from "./nodeStyle";
 
+/**
+ * How editing a label starts: with all of it selected, the cursor at one end,
+ * or the text cleared.
+ */
+export type Caret = "all" | "start" | "end" | "clear";
+
 export type MindNodeData = {
   label: string;
   variant: "root" | "tree" | "floating";
   draft: boolean;
   selected: boolean;
   editing: boolean;
+  caret: Caret;
   dropTarget: boolean;
   deleteAffected: boolean;
   dragging: boolean;
@@ -63,7 +70,7 @@ function MindNodeView({ id, data }: NodeProps<MindFlowNode>) {
         />
       )}
       {data.editing ? (
-        <LabelEditor nodeKey={id} initial={data.label} />
+        <LabelEditor nodeKey={id} initial={data.label} caret={data.caret} />
       ) : (
         <div className="whitespace-pre-wrap break-words">
           {data.label || <span className="italic text-blue-700/70">{PLACEHOLDER}</span>}
@@ -91,9 +98,11 @@ function MindNodeView({ id, data }: NodeProps<MindFlowNode>) {
   );
 }
 
-function LabelEditor({ nodeKey, initial }: { nodeKey: string; initial: string }) {
+type LabelEditorProps = { nodeKey: string; initial: string; caret: Caret };
+
+function LabelEditor({ nodeKey, initial, caret }: LabelEditorProps) {
   const { actions } = useEditor();
-  const [value, setValue] = useState(initial);
+  const [value, setValue] = useState(caret === "clear" ? "" : initial);
   const ref = useRef<HTMLTextAreaElement>(null);
   const done = useRef(false);
 
@@ -106,12 +115,17 @@ function LabelEditor({ nodeKey, initial }: { nodeKey: string; initial: string })
       const el = ref.current;
       if (!el) return;
       el.focus({ preventScroll: true });
-      if (document.activeElement === el) el.select();
-      else if (attempts++ < 60) frame = requestAnimationFrame(focus);
+      if (document.activeElement === el) {
+        if (caret === "all") el.select();
+        else {
+          const at = caret === "start" ? 0 : el.value.length;
+          el.setSelectionRange(at, at);
+        }
+      } else if (attempts++ < 60) frame = requestAnimationFrame(focus);
     };
     focus();
     return () => cancelAnimationFrame(frame);
-  }, []);
+  }, [caret]);
 
   const finish = (via: CommitVia) => {
     if (done.current) return;
@@ -154,16 +168,13 @@ function LabelEditor({ nodeKey, initial }: { nodeKey: string; initial: string })
             e.preventDefault();
             return;
           }
-          if (e.key === "Enter") {
+          // Escape keeps the text too, like Enter.
+          if (e.key === "Enter" || e.key === "Escape") {
             e.preventDefault();
             finish("enter");
           } else if (e.key === "Tab") {
             e.preventDefault();
             finish("tab");
-          } else if (e.key === "Escape") {
-            e.preventDefault();
-            done.current = true;
-            actions.cancelEdit(nodeKey);
           }
         }}
       />

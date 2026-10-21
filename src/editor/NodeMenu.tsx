@@ -4,7 +4,8 @@ import type { MenuItem } from "./menu";
 type Props = {
   x: number;
   y: number;
-  title: string;
+  /** Names the menu for screen readers. */
+  label: string;
   items: MenuItem[];
   active: number;
   onHover: (index: number) => void;
@@ -12,7 +13,7 @@ type Props = {
 };
 
 /** Context menu for a node, mostly for choosing how to delete it. */
-export function NodeMenu({ x, y, title, items, active, onHover, onChoose }: Props) {
+export function NodeMenu({ x, y, label, items, active, onHover, onChoose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   // Keep the menu inside the canvas.
@@ -30,12 +31,12 @@ export function NodeMenu({ x, y, title, items, active, onHover, onChoose }: Prop
     <div
       ref={ref}
       role="menu"
+      aria-label={label}
       className="absolute z-20 w-72 overflow-hidden rounded-lg border border-neutral-300 bg-white text-sm shadow-xl"
       style={{ left: x, top: y }}
       onPointerDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div className="truncate border-b border-neutral-200 px-3 py-2 text-neutral-500">{title}</div>
       {items.map((item, i) => (
         <button
           key={item.id}
@@ -49,8 +50,8 @@ export function NodeMenu({ x, y, title, items, active, onHover, onChoose }: Prop
         >
           <span>{item.label}</span>
           <span className="flex gap-1">
-            {item.keys.map((k) => (
-              <kbd key={k} className="kbd">
+            {item.keys.map((k, i) => (
+              <kbd key={i} className="kbd">
                 {k}
               </kbd>
             ))}

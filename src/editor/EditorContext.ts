@@ -4,7 +4,6 @@ export type CommitVia = "enter" | "tab" | "blur";
 
 export type EditorActions = {
   commitEdit: (key: string, value: string, via: CommitVia) => void;
-  cancelEdit: (key: string) => void;
 };
 
 export type EditorContextValue = {

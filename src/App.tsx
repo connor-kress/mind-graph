@@ -10,6 +10,7 @@ import { NotesPanel } from "./components/NotesPanel";
 import { RecallStart } from "./components/RecallStart";
 import { commitEdits } from "./editor/commitEdits";
 import { TopBar, type Mode } from "./components/TopBar";
+import { isTextInput } from "./editor/isTextInput";
 import { MapEditor } from "./editor/MapEditor";
 
 function modeFromHash(): Mode {
@@ -17,6 +18,8 @@ function modeFromHash(): Mode {
   if (window.location.hash === "#compare") return "compare";
   return "build";
 }
+
+const VIM_STORAGE_KEY = "mind-graph:vim";
 
 const LOCKED = "Finish or abandon your recall attempt first";
 
@@ -59,6 +62,24 @@ export default function App() {
   const [requestedMode, setRequestedMode] = useState<Mode>(modeFromHash);
   const [summary, setSummary] = useState<CompareSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [vim, setVim] = useState(() => localStorage.getItem(VIM_STORAGE_KEY) === "on");
+  const toggleVim = () => setVim((on) => !on);
+  useEffect(() => localStorage.setItem(VIM_STORAGE_KEY, vim ? "on" : "off"), [vim]);
+
+  // M switches the keyboard mode anywhere, except while typing.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat || isTextInput(e.target)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      // The printed letter, falling back to the physical key on non-Latin layouts.
+      if (e.key.toLowerCase() === "m" || (!/^[a-z]$/i.test(e.key) && e.code === "KeyM")) {
+        e.preventDefault();
+        setVim((on) => !on);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   useEffect(() => {
     const onHashChange = () => setRequestedMode(modeFromHash());
@@ -110,10 +131,12 @@ export default function App() {
   let main = null;
   if (workspace?.referenceMapId) {
     if (mode === "build") {
-      main = <MapEditor key={workspace.referenceMapId} mapId={workspace.referenceMapId} />;
+      main = (
+        <MapEditor key={workspace.referenceMapId} mapId={workspace.referenceMapId} vim={vim} />
+      );
     } else if (mode === "recall") {
       main = recallMapId ? (
-        <MapEditor key={recallMapId} mapId={recallMapId} />
+        <MapEditor key={recallMapId} mapId={recallMapId} vim={vim} />
       ) : (
         <RecallStart
           hasPreviousAttempt={!!resultMapId}
@@ -204,6 +227,8 @@ export default function App() {
           disabled={disabled}
           status={status}
           actions={actions}
+          vim={vim}
+          onVimToggle={toggleVim}
         />
         <div className="flex min-h-0 flex-1">
           <div className="relative flex min-w-0 flex-1 flex-col bg-neutral-50">

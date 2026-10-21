@@ -396,7 +396,7 @@ function Legend() {
         </span>
       ))}
       <span className="text-neutral-400">
-        Drag a red node onto a missed one to link them · Ctrl Z to undo
+        Drag a red node onto a missed one to link them · Ctrl z to undo
       </span>
     </div>
   );

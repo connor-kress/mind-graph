@@ -18,9 +18,21 @@ type Props = {
   disabled: Partial<Record<Mode, string>>;
   status?: ReactNode;
   actions?: ReactNode;
+  vim: boolean;
+  onVimToggle: () => void;
 };
 
-export function TopBar({ course, title, mode, onModeChange, disabled, status, actions }: Props) {
+export function TopBar({
+  course,
+  title,
+  mode,
+  onModeChange,
+  disabled,
+  status,
+  actions,
+  vim,
+  onVimToggle,
+}: Props) {
   return (
     <header className="flex h-13 shrink-0 items-center gap-3 border-b border-neutral-300 px-4">
       <h1 className="text-[17px] font-semibold">Mind Graph</h1>
@@ -64,6 +76,16 @@ export function TopBar({ course, title, mode, onModeChange, disabled, status, ac
           })}
         </div>
         {actions}
+        <button
+          type="button"
+          title="Switch keyboard mode (m)"
+          onClick={onVimToggle}
+          // Keep focus on the canvas so its shortcuts keep working.
+          onMouseDown={(e) => e.preventDefault()}
+          className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
+        >
+          {vim ? "Vim mode" : "Normal mode"}
+        </button>
       </div>
     </header>
   );
