@@ -1,9 +1,29 @@
+import type { ManualLink } from "../../convex/model";
 import { buildTree, type MapNode, type NodeMap, type Tree } from "../editor/tree";
 
-export type CompareStatus = "root" | "recalled" | "misplaced" | "extra" | "missed";
+export type CompareStatus =
+  | "root"
+  | "recalled"
+  | "misplaced"
+  /** Where a misplaced node belongs. */
+  | "belongs"
+  | "extra"
+  | "missed";
+
+/** Text for a node's note; `{ em }` parts are terms from the maps, shown in italics. */
+export type Note = (string | { em: string })[];
 
 /** A node of the compare view: the attempt's nodes plus placeholders for misses. */
-export type CompareNode = MapNode & { status: CompareStatus; note?: string };
+export type CompareNode = MapNode & {
+  status: CompareStatus;
+  note?: Note;
+  /** The reference node it matches, or stands in for (placeholders). */
+  refKey?: string;
+  /** The student's own label, for manual matches (which show the reference's). */
+  answer?: string;
+  /** For placeholders: the attempt node matched to it, placed elsewhere. */
+  placedAt?: string;
+};
 
 export type CompareSummary = Pick<CompareResult, "recalled" | "total" | "misplaced">;
 
@@ -16,6 +36,8 @@ export type CompareResult = {
   misplaced: number;
   missed: number;
   extra: number;
+  /** Whether an attempt node sits under the match of a reference node's parent. */
+  fitsUnder: (attemptKey: string, refKey: string) => boolean;
 };
 
 /** Labels match when they're equal ignoring case, accents, spacing, and punctuation. */
@@ -36,13 +58,18 @@ function breadthFirst(tree: Tree): MapNode[] {
   return order;
 }
 
-const missedKey = (referenceKey: string) => `missed:${referenceKey}`;
+const slotPrefix = "ref:";
 
 /**
- * Compares a recall attempt against the reference map. Only the reference's
- * tree counts; its floating nodes are treated as unfinished notes.
+ * Compares a recall attempt against the reference map. Only the trees count:
+ * floating nodes are ignored (an attempt's are discarded when it's finished).
+ * `links` are matches made by hand, which take priority over matching by label.
  */
-export function compareMaps(reference: NodeMap, attempt: NodeMap): CompareResult {
+export function compareMaps(
+  reference: NodeMap,
+  attempt: NodeMap,
+  links: ManualLink[] = [],
+): CompareResult {
   const refTree = buildTree(reference);
   const tryTree = buildTree(attempt);
   const refOrder = breadthFirst(refTree);
@@ -56,6 +83,24 @@ export function compareMaps(reference: NodeMap, attempt: NodeMap): CompareResult
   };
   if (refTree.root && tryTree.root) link(tryTree.root.key, refTree.root.key);
 
+  // Manual links first. Whether each counts as recalled, by attempt key.
+  const manual = new Map<string, boolean>();
+  for (const { nodeKey, refKey, correct } of links) {
+    const node = attempt.get(nodeKey);
+    if (
+      !node ||
+      node.isRoot ||
+      !tryTree.depth.has(nodeKey) ||
+      !refTree.depth.has(refKey) ||
+      refKey === refTree.root?.key
+    ) {
+      continue;
+    }
+    if (toRef.has(nodeKey) || toAttempt.has(refKey)) continue;
+    link(nodeKey, refKey);
+    manual.set(nodeKey, correct);
+  }
+
   const byLabel = new Map<string, MapNode[]>();
   for (const node of refOrder) {
     if (node.isRoot) continue;
@@ -68,7 +113,7 @@ export function compareMaps(reference: NodeMap, attempt: NodeMap): CompareResult
   // First, nodes under the right parent (parents are matched before children),
   // so duplicate labels pair up with the right reference node.
   for (const node of tryOrder) {
-    if (node.isRoot || !node.parentKey) continue;
+    if (node.isRoot || !node.parentKey || toRef.has(node.key)) continue;
     const parentRef = toRef.get(node.parentKey);
     const ref = parentRef && candidate(node, (r) => r.parentKey === parentRef);
     if (ref) link(node.key, ref.key);
@@ -78,9 +123,6 @@ export function compareMaps(reference: NodeMap, attempt: NodeMap): CompareResult
   // pair up with the right duplicates. Nodes that anchor structure (same-parent
   // matches, or nodes with children of their own) claim labels before stray
   // leaves, so a stray copy can't take a label its proper twin needs.
-  const floating = [...tryTree.floating].sort(
-    (a, b) => (a.y ?? 0) - (b.y ?? 0) || (a.x ?? 0) - (b.x ?? 0),
-  );
   const matchByLabel = (node: MapNode, anchorsOnly: boolean) => {
     if (node.isRoot || toRef.has(node.key)) return;
     const parentRef = node.parentKey ? toRef.get(node.parentKey) : undefined;
@@ -91,73 +133,118 @@ export function compareMaps(reference: NodeMap, attempt: NodeMap): CompareResult
     if (ref) link(node.key, ref.key);
   };
   for (const node of tryOrder) matchByLabel(node, true);
-  for (const node of [...tryOrder, ...floating]) matchByLabel(node, false);
+  for (const node of tryOrder) matchByLabel(node, false);
   const refLabels = new Set(byLabel.keys());
+
+  /** Whether an attempt node sits under the match of a reference node's parent. */
+  const fitsUnder = (attemptKey: string, refKey: string) => {
+    const parentKey = attempt.get(attemptKey)?.parentKey;
+    return !!parentKey && toRef.get(parentKey) === reference.get(refKey)?.parentKey;
+  };
+  // Every reference node has one spot in the compare tree: its match, if
+  // that's in the right place, or else a placeholder where it belongs. The
+  // children of a misplaced node are shown (and graded) at that spot.
+  const slotKey = (refKey: string) => {
+    const attemptKey = toAttempt.get(refKey);
+    const isRoot = refKey === refTree.root?.key;
+    return attemptKey && (isRoot || fitsUnder(attemptKey, refKey))
+      ? attemptKey
+      : slotPrefix + refKey;
+  };
+  /**
+   * An attempt node's label as shown. Matches by label show the reference's
+   * spelling. A manual match in place shows the reference's label too (the
+   * student's is revealable), while one placed elsewhere keeps the student's.
+   */
+  const shownLabel = (attemptKey: string) => {
+    const node = attempt.get(attemptKey);
+    const refKey = toRef.get(attemptKey);
+    const ref = refKey ? reference.get(refKey) : undefined;
+    if (node?.isRoot || !ref || (manual.has(attemptKey) && !revealable(attemptKey))) {
+      return node?.label ?? "";
+    }
+    return ref.label;
+  };
+  /** Manual matches in place, whose student label can be revealed. */
+  const revealable = (attemptKey: string) => {
+    const refKey = toRef.get(attemptKey);
+    return manual.has(attemptKey) && !!refKey && slotKey(refKey) === attemptKey;
+  };
 
   const nodes = new Map<string, CompareNode>();
   let misplaced = 0;
   let extra = 0;
-  for (const node of attempt.values()) {
+  for (const node of tryOrder) {
     const refKey = toRef.get(node.key);
     const ref = refKey ? reference.get(refKey) : undefined;
+    const parentRef = node.parentKey ? toRef.get(node.parentKey) : undefined;
+    const shown = { ...node, parentKey: parentRef ? slotKey(parentRef) : node.parentKey };
     if (node.isRoot) {
-      nodes.set(node.key, { ...node, status: "root" });
+      nodes.set(node.key, { ...shown, status: "root" });
     } else if (!ref) {
       extra++;
       const note = refLabels.has(normalizeLabel(node.label))
-        ? "Repeats a node you already recalled"
-        : "Not in your reference tree";
-      nodes.set(node.key, { ...node, status: "extra", note });
+        ? ["Repeats a node you already recalled"]
+        : ["Not in your reference tree"];
+      nodes.set(node.key, { ...shown, status: "extra", note });
     } else {
-      const inTree = tryTree.depth.has(node.key);
-      const parentRef = inTree && node.parentKey ? toRef.get(node.parentKey) : undefined;
-      if (parentRef === ref.parentKey) {
-        nodes.set(node.key, { ...node, status: "recalled" });
+      const matched = {
+        ...shown,
+        refKey: ref.key,
+        label: shownLabel(node.key),
+        ...(revealable(node.key) && { answer: node.label }),
+      };
+      if (manual.get(node.key) === false) {
+        extra++;
+        nodes.set(node.key, { ...matched, status: "extra" });
+      } else if (fitsUnder(node.key, ref.key)) {
+        nodes.set(node.key, { ...matched, status: "recalled" });
       } else {
         misplaced++;
         const parentLabel = ref.parentKey ? reference.get(ref.parentKey)?.label : undefined;
         nodes.set(node.key, {
-          ...node,
+          ...matched,
           status: "misplaced",
-          note: `In your reference, ${ref.label} belongs under ${parentLabel ?? "the root"}`,
+          note: [{ em: ref.label }, " belongs under ", { em: parentLabel ?? "" }],
         });
       }
     }
   }
 
-  // Where a reference node's children go in the compare view: its match if
-  // that's in the tree, its placeholder if it was missed, or else (matched but
-  // floating, which can't have children) the nearest such ancestor.
-  const displayParent = (refKey: string): string => {
-    const attemptKey = toAttempt.get(refKey);
-    if (!attemptKey) return missedKey(refKey);
-    if (tryTree.depth.has(attemptKey)) return attemptKey;
-    const parentKey = reference.get(refKey)?.parentKey;
-    return parentKey ? displayParent(parentKey) : attemptKey;
-  };
-
-  // Placeholders for missed nodes, under wherever their parent ended up.
+  // Placeholders where reference nodes belong but nothing (in place) is.
   let missed = 0;
   for (const ref of refOrder) {
-    if (ref.isRoot || toAttempt.has(ref.key) || !ref.parentKey) continue;
-    missed++;
-    const parentKey = displayParent(ref.parentKey);
-    const shownUnderParent =
-      parentKey === (toAttempt.get(ref.parentKey) ?? missedKey(ref.parentKey));
-    nodes.set(missedKey(ref.key), {
-      key: missedKey(ref.key),
+    if (ref.isRoot || !ref.parentKey) continue;
+    const attemptKey = toAttempt.get(ref.key);
+    const recalled = attemptKey !== undefined && manual.get(attemptKey) !== false;
+    if (!recalled) missed++;
+    const key = slotKey(ref.key);
+    if (key === attemptKey) continue;
+    const placedUnder = attemptKey && attempt.get(attemptKey)?.parentKey;
+    nodes.set(key, {
+      key,
       label: ref.label,
-      parentKey,
+      parentKey: slotKey(ref.parentKey),
       // After the attempt's own children.
       order: 1e6 + ref.order,
       isRoot: false,
-      status: "missed",
-      note: shownUnderParent
-        ? undefined
-        : `Belongs under ${reference.get(ref.parentKey)?.label ?? "the root"}`,
+      refKey: ref.key,
+      placedAt: attemptKey,
+      status: recalled ? "belongs" : "missed",
+      note: placedUnder
+        ? ["You placed ", { em: ref.label }, " under ", { em: shownLabel(placedUnder) }]
+        : undefined,
     });
   }
 
   const total = refOrder.length - (refTree.root ? 1 : 0);
-  return { nodes, total, recalled: total - missed, misplaced, missed, extra };
+  return {
+    nodes,
+    total,
+    recalled: total - missed,
+    misplaced,
+    missed,
+    extra,
+    fitsUnder,
+  };
 }

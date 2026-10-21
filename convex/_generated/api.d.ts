@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as links from "../links.js";
 import type * as model from "../model.js";
 import type * as nodes from "../nodes.js";
 import type * as seedData from "../seedData.js";
@@ -20,6 +21,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  links: typeof links;
   model: typeof model;
   nodes: typeof nodes;
   seedData: typeof seedData;

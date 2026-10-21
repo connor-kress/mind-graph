@@ -62,13 +62,24 @@ export const startRecall = mutation({
   },
 });
 
-/** Locks an in-progress recall attempt so it can be compared. */
+/**
+ * Locks an in-progress recall attempt so it can be compared. Floating nodes
+ * are discarded: only the tree is compared (the client warns about this).
+ */
 export const finishRecall = mutation({
   args: { mapId: v.id("maps") },
   handler: async (ctx, { mapId }) => {
     const map = await ctx.db.get(mapId);
     if (!map || map.kind !== "recall") throw new ConvexError("Recall attempt not found");
-    if (!map.finishedAt) await ctx.db.patch(mapId, { finishedAt: Date.now() });
+    if (map.finishedAt) return;
+    const nodes = await ctx.db
+      .query("nodes")
+      .withIndex("by_map_key", (q) => q.eq("mapId", mapId))
+      .collect();
+    for (const node of nodes) {
+      if (!node.isRoot && node.parentKey === undefined) await ctx.db.delete(node._id);
+    }
+    await ctx.db.patch(mapId, { finishedAt: Date.now() });
   },
 });
 

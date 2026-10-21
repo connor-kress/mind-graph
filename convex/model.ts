@@ -26,3 +26,16 @@ export const nodeValidator = v.object(nodeFields);
 export type MapNode = Infer<typeof nodeValidator>;
 
 export const mapKind = v.union(v.literal("reference"), v.literal("recall"));
+
+/**
+ * A recall node the student linked by hand to a reference node it didn't
+ * match, e.g. a misspelling. `correct` says whether it counts as recalled or
+ * is only associated, so its children are still compared.
+ */
+export const linkValidator = v.object({
+  nodeKey: v.string(),
+  refKey: v.string(),
+  correct: v.boolean(),
+});
+
+export type ManualLink = Infer<typeof linkValidator>;

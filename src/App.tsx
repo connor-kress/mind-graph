@@ -1,5 +1,5 @@
 import type { OptimisticLocalStore } from "convex/browser";
-import { useMutation, useQuery } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../convex/_generated/api";
@@ -42,6 +42,7 @@ const errorMessage = (error: unknown, fallback: string) =>
   error instanceof ConvexError ? String(error.data) : fallback;
 
 export default function App() {
+  const convex = useConvex();
   const workspace = useQuery(api.workspace.get);
   const seed = useMutation(api.workspace.seed);
   const startRecall = useMutation(api.workspace.startRecall);
@@ -130,6 +131,7 @@ export default function App() {
           referenceMapId={workspace.referenceMapId}
           resultMapId={resultMapId}
           onSummary={setSummary}
+          onError={setError}
         />
       );
     }
@@ -160,6 +162,17 @@ export default function App() {
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
           commitEdits();
+          // Only the tree is compared, so floating nodes are discarded. Read
+          // the local copy, which includes a label that was just committed.
+          const nodes = convex
+            .watchQuery(api.nodes.list, { mapId: recallMapId })
+            .localQueryResult();
+          const floating = nodes?.filter((n) => !n.isRoot && !n.parentKey).length ?? 0;
+          const discard =
+            floating === 1
+              ? "Your unconnected node will be discarded."
+              : `Your ${floating} unconnected nodes will be discarded.`;
+          if (floating && !confirm(`${discard} Finish anyway?`)) return;
           setError(null);
           setRequestedMode("compare");
           finishRecall({ mapId: recallMapId }).catch((e) =>
