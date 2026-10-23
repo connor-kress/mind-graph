@@ -1,6 +1,7 @@
 type Notes = { heading: string; paragraphs: string[] };
 
-export function NotesPanel({ notes, hidden }: { notes?: Notes; hidden: boolean }) {
+/** `notes` is undefined while loading, and null for a map without notes. */
+export function NotesPanel({ notes, hidden }: { notes?: Notes | null; hidden: boolean }) {
   if (hidden) {
     return (
       <aside className="flex w-72 shrink-0 flex-col items-center justify-center gap-2 border-l border-neutral-300 bg-neutral-100 px-8 text-center">
@@ -24,6 +25,9 @@ export function NotesPanel({ notes, hidden }: { notes?: Notes; hidden: boolean }
             <p key={i}>{p}</p>
           ))}
         </div>
+      )}
+      {notes === null && (
+        <p className="px-4 py-4 text-sm text-neutral-500">No source notes for this map yet.</p>
       )}
     </aside>
   );

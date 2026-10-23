@@ -12,6 +12,7 @@ import { commitEdits } from "./editor/commitEdits";
 import { TopBar, type Mode } from "./components/TopBar";
 import { isTextInput } from "./editor/isTextInput";
 import { MapEditor } from "./editor/MapEditor";
+import { Sidebar } from "./sidebar/Sidebar";
 
 function modeFromHash(): Mode {
   if (window.location.hash === "#recall") return "recall";
@@ -19,7 +20,14 @@ function modeFromHash(): Mode {
   return "build";
 }
 
+/** The open map (topic) is kept in the URL's query, the mode in its hash. */
+const MAP_PARAM = "map";
+
+const topicFromUrl = () => new URLSearchParams(location.search).get(MAP_PARAM) ?? undefined;
+
 const VIM_STORAGE_KEY = "mind-graph:vim";
+
+const SIDEBAR_STORAGE_KEY = "mind-graph:sidebar";
 
 const LOCKED = "Finish or abandon your recall attempt first";
 
@@ -28,17 +36,14 @@ const LOCKED = "Finish or abandon your recall attempt first";
  * nothing more can be typed into it while the server catches up.
  */
 function endAttempt(store: OptimisticLocalStore, mapId: Id<"maps">, finished: boolean) {
-  const current = store.getQuery(api.workspace.get, {});
-  if (!current) return;
-  store.setQuery(
-    api.workspace.get,
-    {},
-    {
-      ...current,
+  for (const { args, value } of store.getAllQueries(api.workspace.get)) {
+    if (value?.recallMapId !== mapId) continue;
+    store.setQuery(api.workspace.get, args, {
+      ...value,
       recallMapId: null,
-      resultMapId: finished ? mapId : current.resultMapId,
-    },
-  );
+      resultMapId: finished ? mapId : value.resultMapId,
+    });
+  }
 }
 
 const errorMessage = (error: unknown, fallback: string) =>
@@ -46,7 +51,9 @@ const errorMessage = (error: unknown, fallback: string) =>
 
 export default function App() {
   const convex = useConvex();
-  const workspace = useQuery(api.workspace.get);
+  const [topicId, setTopicId] = useState(topicFromUrl);
+  const workspace = useQuery(api.workspace.get, { topicId });
+  const library = useQuery(api.library.list);
   const seed = useMutation(api.workspace.seed);
   const startRecall = useMutation(api.workspace.startRecall);
   const finish = useMutation(api.workspace.finishRecall);
@@ -65,11 +72,26 @@ export default function App() {
   const [vim, setVim] = useState(() => localStorage.getItem(VIM_STORAGE_KEY) === "on");
   const toggleVim = () => setVim((on) => !on);
   useEffect(() => localStorage.setItem(VIM_STORAGE_KEY, vim ? "on" : "off"), [vim]);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => localStorage.getItem(SIDEBAR_STORAGE_KEY) !== "closed",
+  );
+  const toggleSidebar = () => setSidebarOpen((open) => !open);
+  useEffect(
+    () => localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarOpen ? "open" : "closed"),
+    [sidebarOpen],
+  );
 
-  // M switches the keyboard mode anywhere, except while typing.
+  // Ctrl+\ toggles the sidebar anywhere (as in Notion). M switches the
+  // keyboard mode anywhere, except while typing.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.repeat || isTextInput(e.target)) return;
+      if (e.defaultPrevented || e.repeat) return;
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === "Backslash") {
+        e.preventDefault();
+        setSidebarOpen((open) => !open);
+        return;
+      }
+      if (isTextInput(e.target)) return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       // The printed letter, falling back to the physical key on non-Latin layouts.
       if (e.key.toLowerCase() === "m" || (!/^[a-z]$/i.test(e.key) && e.code === "KeyM")) {
@@ -83,13 +105,34 @@ export default function App() {
 
   useEffect(() => {
     const onHashChange = () => setRequestedMode(modeFromHash());
+    // Back and forward between maps.
+    const onPopState = () => {
+      setTopicId(topicFromUrl());
+      setRequestedMode(modeFromHash());
+      setSummary(null);
+      setError(null);
+    };
     window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("hashchange", onHashChange);
+      window.removeEventListener("popstate", onPopState);
+    };
   }, []);
 
   useEffect(() => {
-    if (workspace === null) seed().catch(console.error);
-  }, [workspace, seed]);
+    if (library?.length === 0) seed().catch(console.error);
+  }, [library, seed]);
+
+  const openMap = (id: Id<"topics">) => {
+    if (id === workspace?.topic._id) return;
+    commitEdits();
+    history.pushState(null, "", `${location.pathname}?${MAP_PARAM}=${id}`);
+    setTopicId(id);
+    setRequestedMode("build");
+    setSummary(null);
+    setError(null);
+  };
 
   // An attempt in progress locks Build and Compare, which would reveal the answers.
   const recallMapId = workspace?.recallMapId;
@@ -119,12 +162,14 @@ export default function App() {
   if (recallMapId) mode = "recall";
   else if (mode === "compare" && workspace && !resultMapId) mode = "build";
 
-  // Keep the URL in step with what's shown (including forced modes).
+  // Keep the URL in step with what's shown (including forced modes, and the
+  // map opened when the URL named none or an unknown one).
   useEffect(() => {
     if (!workspace) return;
+    const search = `?${MAP_PARAM}=${workspace.topic._id}`;
     const hash = mode === "build" ? "" : `#${mode}`;
-    if (location.hash !== hash) {
-      history.replaceState(null, "", location.pathname + location.search + hash);
+    if (location.search !== search || location.hash !== hash) {
+      history.replaceState(null, "", location.pathname + search + hash);
     }
   }, [mode, workspace]);
 
@@ -214,10 +259,18 @@ export default function App() {
       : undefined;
 
   return (
-    <div className="flex h-full flex-col p-3">
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-neutral-300 bg-white shadow-sm">
+    <div className="flex h-full bg-white">
+      <Sidebar
+        open={sidebarOpen}
+        onToggle={toggleSidebar}
+        library={library}
+        activeTopicId={workspace?.topic._id}
+        onOpenMap={openMap}
+        onError={setError}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
         <TopBar
-          course={workspace?.topic.course}
+          folder={workspace?.folderName}
           title={workspace?.topic.title}
           mode={mode}
           onModeChange={(next) => {
@@ -229,6 +282,8 @@ export default function App() {
           actions={actions}
           vim={vim}
           onVimToggle={toggleVim}
+          sidebarOpen={sidebarOpen}
+          onSidebarToggle={toggleSidebar}
         />
         <div className="flex min-h-0 flex-1">
           <div className="relative flex min-w-0 flex-1 flex-col bg-neutral-50">
@@ -250,7 +305,10 @@ export default function App() {
               </div>
             )}
           </div>
-          <NotesPanel notes={workspace?.topic.notes} hidden={mode === "recall"} />
+          <NotesPanel
+            notes={workspace && (workspace.topic.notes ?? null)}
+            hidden={mode === "recall"}
+          />
         </div>
       </div>
     </div>

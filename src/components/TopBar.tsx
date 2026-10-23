@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { commitEdits } from "../editor/commitEdits";
+import { ExpandIcon } from "../sidebar/icons";
+import { Logo } from "./Logo";
 
 export type Mode = "build" | "recall" | "compare";
 
@@ -10,7 +12,7 @@ const MODES: { id: Mode; label: string }[] = [
 ];
 
 type Props = {
-  course?: string;
+  folder?: string | null;
   title?: string;
   mode: Mode;
   onModeChange: (mode: Mode) => void;
@@ -20,10 +22,13 @@ type Props = {
   actions?: ReactNode;
   vim: boolean;
   onVimToggle: () => void;
+  /** While the sidebar is collapsed, the bar shows its expand button and the logo. */
+  sidebarOpen: boolean;
+  onSidebarToggle: () => void;
 };
 
 export function TopBar({
-  course,
+  folder,
   title,
   mode,
   onModeChange,
@@ -32,14 +37,44 @@ export function TopBar({
   actions,
   vim,
   onVimToggle,
+  sidebarOpen,
+  onSidebarToggle,
 }: Props) {
   return (
-    <header className="flex h-13 shrink-0 items-center gap-3 border-b border-neutral-300 px-4">
-      <h1 className="text-[17px] font-semibold">Mind Graph</h1>
-      {course && title && (
-        <span className="min-w-0 truncate text-sm text-neutral-500">
-          {course} / {title}
-        </span>
+    <header className="flex h-13 shrink-0 items-center gap-3 border-b border-neutral-200 px-4">
+      {!sidebarOpen && (
+        <>
+          <button
+            type="button"
+            title="Expand sidebar (Ctrl+\)"
+            aria-label="Expand sidebar"
+            onClick={onSidebarToggle}
+            onMouseDown={(e) => e.preventDefault()}
+            className="-ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100"
+          >
+            <ExpandIcon />
+          </button>
+          <Logo />
+          <span className="h-5 w-px shrink-0 bg-neutral-200" aria-hidden />
+        </>
+      )}
+      {title && (
+        <nav
+          aria-label="Breadcrumb"
+          className="flex min-w-0 items-center gap-2 text-[13px] text-neutral-500"
+        >
+          <span className="shrink-0">Library</span>
+          <span aria-hidden>/</span>
+          {folder && (
+            <>
+              <span className="truncate">{folder}</span>
+              <span aria-hidden>/</span>
+            </>
+          )}
+          <span aria-current="page" className="truncate font-semibold text-neutral-900">
+            {title}
+          </span>
+        </nav>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-3">
         {status && <span className="text-sm font-medium text-neutral-800">{status}</span>}
