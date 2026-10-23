@@ -4,6 +4,14 @@
 
 @theme {
   --font-sans: "Noto Sans Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-accent: #1d5fbf;
+  --color-accent-soft: #e8f0fb;
+  --color-due: #8a4500;
+  --color-due-soft: #fdf0e2;
+  --color-sidebar: #f6f7f9;
+  --color-sidebar-hover: #eceff3;
+  --color-sidebar-active: #dfe3e8;
 }
 
 html,
