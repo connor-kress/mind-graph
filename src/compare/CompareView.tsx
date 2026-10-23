@@ -16,7 +16,12 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { ESTIMATED_SIZE, layoutTree } from "../editor/layout";
 import { buildTree, type Size, type XY } from "../editor/tree";
 import type { ManualLink } from "../../convex/model";
-import { compareMaps, type CompareStatus, type CompareSummary } from "./compare";
+import {
+  compareMaps,
+  type CompareNode as ComparedNode,
+  type CompareStatus,
+  type CompareSummary,
+} from "./compare";
 import { CompareNode, type CompareFlowNode } from "./CompareNode";
 import { LinkMenu } from "./LinkMenu";
 import { StatusBadge } from "./StatusBadge";
@@ -258,12 +263,15 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
 
   // Drop a drag or menu whose nodes changed under it (e.g. an edit elsewhere).
   const draggedNode = drag && result.nodes.get(drag.key);
-  if (drag && draggedNode?.status !== "extra") setDrag(null);
+  if (drag && !(draggedNode && draggable(draggedNode))) setDrag(null);
   const pendingTarget = pending && result.nodes.get(pending.targetKey);
   const pendingDragged = pending && result.nodes.get(pending.nodeKey);
   if (
     pending &&
-    (!pendingTarget || !linkable(pendingTarget.status) || pendingDragged?.status !== "extra")
+    (!pendingTarget ||
+      !linkable(pendingTarget.status) ||
+      !pendingDragged ||
+      !draggable(pendingDragged))
   ) {
     closeMenu();
   }
@@ -275,8 +283,8 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
       type: "compare",
       position: dragging ? drag.position : (positions.get(node.key) ?? { x: 0, y: 0 }),
       measured: sizes.get(node.key),
-      // Red nodes can be dropped onto missed ones to link them.
-      draggable: node.status === "extra" && !pending,
+      // Red (and linked) nodes can be dropped onto missed ones to link them.
+      draggable: draggable(node) && !pending,
       selectable: false,
       zIndex: dragging ? 1000 : node.key === selected ? 10 : 0,
       data: {
@@ -381,6 +389,9 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
     </div>
   );
 }
+
+/** Red nodes, and ones linked by hand (to change their link), can be dragged. */
+const draggable = (node: ComparedNode) => node.status === "extra" || !!node.manual;
 
 /** Missed reference nodes, which red nodes can be linked to (replacing any link). */
 const linkable = (status: CompareStatus) => status === "missed" || status === "intended";
