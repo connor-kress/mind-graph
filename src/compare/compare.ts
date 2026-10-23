@@ -23,6 +23,8 @@ export type CompareNode = MapNode & {
   refKey?: string;
   /** The student's own label, for manual matches (which show the reference's). */
   answer?: string;
+  /** Whether it was linked to its reference node by hand. */
+  manual?: boolean;
   /** For placeholders: the attempt node matched to it, placed elsewhere. */
   placedAt?: string;
 };
@@ -195,6 +197,7 @@ export function compareMaps(
         refKey: ref.key,
         label: shownLabel(node.key),
         ...(revealable(node.key) && { answer: node.label }),
+        ...(manual.has(node.key) && { manual: true }),
       };
       const inPlace = fitsUnder(node.key, ref.key);
       const parentLabel = ref.parentKey ? reference.get(ref.parentKey)?.label : undefined;
