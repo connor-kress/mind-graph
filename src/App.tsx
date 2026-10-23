@@ -12,6 +12,7 @@ import { commitEdits } from "./editor/commitEdits";
 import { TopBar, type Mode } from "./components/TopBar";
 import { isTextInput } from "./editor/isTextInput";
 import { MapEditor } from "./editor/MapEditor";
+import { Sidebar } from "./sidebar/Sidebar";
 
 function modeFromHash(): Mode {
   if (window.location.hash === "#recall") return "recall";
@@ -25,6 +26,8 @@ const MAP_PARAM = "map";
 const topicFromUrl = () => new URLSearchParams(location.search).get(MAP_PARAM) ?? undefined;
 
 const VIM_STORAGE_KEY = "mind-graph:vim";
+
+const SIDEBAR_STORAGE_KEY = "mind-graph:sidebar";
 
 const LOCKED = "Finish or abandon your recall attempt first";
 
@@ -69,11 +72,26 @@ export default function App() {
   const [vim, setVim] = useState(() => localStorage.getItem(VIM_STORAGE_KEY) === "on");
   const toggleVim = () => setVim((on) => !on);
   useEffect(() => localStorage.setItem(VIM_STORAGE_KEY, vim ? "on" : "off"), [vim]);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => localStorage.getItem(SIDEBAR_STORAGE_KEY) !== "closed",
+  );
+  const toggleSidebar = () => setSidebarOpen((open) => !open);
+  useEffect(
+    () => localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarOpen ? "open" : "closed"),
+    [sidebarOpen],
+  );
 
-  // M switches the keyboard mode anywhere, except while typing.
+  // Ctrl+\ toggles the sidebar anywhere (as in Notion). M switches the
+  // keyboard mode anywhere, except while typing.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.repeat || isTextInput(e.target)) return;
+      if (e.defaultPrevented || e.repeat) return;
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === "Backslash") {
+        e.preventDefault();
+        setSidebarOpen((open) => !open);
+        return;
+      }
+      if (isTextInput(e.target)) return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       // The printed letter, falling back to the physical key on non-Latin layouts.
       if (e.key.toLowerCase() === "m" || (!/^[a-z]$/i.test(e.key) && e.code === "KeyM")) {
@@ -105,6 +123,16 @@ export default function App() {
   useEffect(() => {
     if (library?.length === 0) seed().catch(console.error);
   }, [library, seed]);
+
+  const openMap = (id: Id<"topics">) => {
+    if (id === workspace?.topic._id) return;
+    commitEdits();
+    history.pushState(null, "", `${location.pathname}?${MAP_PARAM}=${id}`);
+    setTopicId(id);
+    setRequestedMode("build");
+    setSummary(null);
+    setError(null);
+  };
 
   // An attempt in progress locks Build and Compare, which would reveal the answers.
   const recallMapId = workspace?.recallMapId;
@@ -231,8 +259,15 @@ export default function App() {
       : undefined;
 
   return (
-    <div className="flex h-full flex-col p-3">
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-neutral-300 bg-white shadow-sm">
+    <div className="flex h-full bg-white">
+      <Sidebar
+        open={sidebarOpen}
+        onToggle={toggleSidebar}
+        library={library}
+        activeTopicId={workspace?.topic._id}
+        onOpenMap={openMap}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
         <TopBar
           folder={workspace?.folderName}
           title={workspace?.topic.title}
@@ -246,6 +281,8 @@ export default function App() {
           actions={actions}
           vim={vim}
           onVimToggle={toggleVim}
+          sidebarOpen={sidebarOpen}
+          onSidebarToggle={toggleSidebar}
         />
         <div className="flex min-h-0 flex-1">
           <div className="relative flex min-w-0 flex-1 flex-col bg-neutral-50">

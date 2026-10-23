@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { commitEdits } from "../editor/commitEdits";
+import { ExpandIcon } from "../sidebar/icons";
+import { Logo } from "./Logo";
 
 export type Mode = "build" | "recall" | "compare";
 
@@ -20,6 +22,9 @@ type Props = {
   actions?: ReactNode;
   vim: boolean;
   onVimToggle: () => void;
+  /** While the sidebar is collapsed, the bar shows its expand button and the logo. */
+  sidebarOpen: boolean;
+  onSidebarToggle: () => void;
 };
 
 export function TopBar({
@@ -32,10 +37,27 @@ export function TopBar({
   actions,
   vim,
   onVimToggle,
+  sidebarOpen,
+  onSidebarToggle,
 }: Props) {
   return (
-    <header className="flex h-13 shrink-0 items-center gap-3 border-b border-neutral-300 px-4">
-      <h1 className="text-[17px] font-semibold">Mind Graph</h1>
+    <header className="flex h-13 shrink-0 items-center gap-3 border-b border-neutral-200 px-4">
+      {!sidebarOpen && (
+        <>
+          <button
+            type="button"
+            title="Expand sidebar (Ctrl+\)"
+            aria-label="Expand sidebar"
+            onClick={onSidebarToggle}
+            onMouseDown={(e) => e.preventDefault()}
+            className="-ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100"
+          >
+            <ExpandIcon />
+          </button>
+          <Logo />
+          <span className="h-5 w-px shrink-0 bg-neutral-200" aria-hidden />
+        </>
+      )}
       {title && (
         <nav
           aria-label="Breadcrumb"
