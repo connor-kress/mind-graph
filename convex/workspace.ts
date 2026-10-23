@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { demoNotes, demoReferenceTree, demoTopic, type SeedNode } from "./seedData";
+import { demoLibrary, type SeedNode } from "./seedData";
 
 /**
  * A topic with its maps: the one asked for, or the first one if it's missing
@@ -39,17 +39,45 @@ export const get = query({
   },
 });
 
-/** Creates the demo topic and reference map if they don't exist yet. */
+/**
+ * Creates the demo library if there are no folders yet. Topics from before
+ * folders existed move into the folder named after their course, and demo
+ * maps they already cover aren't created again.
+ */
 export const seed = mutation({
   args: {},
   handler: async (ctx) => {
-    if (await ctx.db.query("topics").first()) return;
-    const topicId = await ctx.db.insert("topics", {
-      ...demoTopic,
-      notes: demoNotes,
-    });
-    const mapId = await ctx.db.insert("maps", { topicId, kind: "reference" });
-    await insertTree(ctx, mapId, demoReferenceTree, undefined, 0);
+    if (await ctx.db.query("folders").first()) return;
+    const folderIds = new Map<string, Id<"folders">>();
+    const folderFor = async (name: string) => {
+      let folderId = folderIds.get(name);
+      if (!folderId) {
+        folderId = await ctx.db.insert("folders", { name, order: folderIds.size });
+        folderIds.set(name, folderId);
+      }
+      return folderId;
+    };
+    for (const folder of demoLibrary) await folderFor(folder.name);
+
+    const existing = await ctx.db.query("topics").collect();
+    for (const topic of existing) {
+      const folderId = await folderFor(topic.course ?? "Unsorted");
+      await ctx.db.patch(topic._id, { folderId, course: undefined });
+    }
+
+    for (const folder of demoLibrary) {
+      for (const map of folder.maps) {
+        const exists = existing.some((t) => t.course === folder.name && t.title === map.title);
+        if (exists) continue;
+        const topicId = await ctx.db.insert("topics", {
+          folderId: await folderFor(folder.name),
+          title: map.title,
+          notes: map.notes,
+        });
+        const mapId = await ctx.db.insert("maps", { topicId, kind: "reference" });
+        await insertTree(ctx, mapId, { label: map.title, children: map.children }, undefined, 0);
+      }
+    }
   },
 });
 
