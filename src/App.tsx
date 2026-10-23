@@ -46,7 +46,7 @@ const errorMessage = (error: unknown, fallback: string) =>
 
 export default function App() {
   const convex = useConvex();
-  const workspace = useQuery(api.workspace.get);
+  const workspace = useQuery(api.workspace.get, {});
   const seed = useMutation(api.workspace.seed);
   const startRecall = useMutation(api.workspace.startRecall);
   const finish = useMutation(api.workspace.finishRecall);

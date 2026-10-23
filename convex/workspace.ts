@@ -3,12 +3,18 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import type { Id } from "./_generated/dataModel";
 import { demoNotes, demoReferenceTree, demoTopic, type SeedNode } from "./seedData";
 
-/** The single demo topic (until auth exists), with its maps. */
+/**
+ * A topic with its maps: the one asked for, or the first one if it's missing
+ * or unknown (the id comes from the URL, so it may be stale or malformed).
+ */
 export const get = query({
-  args: {},
-  handler: async (ctx) => {
-    const topic = await ctx.db.query("topics").first();
+  args: { topicId: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const topicId = args.topicId && ctx.db.normalizeId("topics", args.topicId);
+    const topic =
+      (topicId && (await ctx.db.get(topicId))) || (await ctx.db.query("topics").first());
     if (!topic) return null;
+    const folder = topic.folderId && (await ctx.db.get(topic.folderId));
     const reference = await ctx.db
       .query("maps")
       .withIndex("by_topic_kind", (q) => q.eq("topicId", topic._id).eq("kind", "reference"))
@@ -23,6 +29,7 @@ export const get = query({
       .first();
     return {
       topic,
+      folderName: folder ? folder.name : (topic.course ?? null),
       referenceMapId: reference?._id ?? null,
       /** The recall attempt being worked on, if any. */
       recallMapId: inProgress?._id ?? null,
@@ -111,7 +118,7 @@ function inProgressRecall(ctx: QueryCtx, topicId: Id<"topics">) {
     .first();
 }
 
-async function insertTree(
+export async function insertTree(
   ctx: MutationCtx,
   mapId: Id<"maps">,
   node: SeedNode,
