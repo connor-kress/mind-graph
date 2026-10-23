@@ -87,10 +87,13 @@ export function LinkMenu({ anchor, answer, target, misplaced, onChoose, onCancel
         </button>
         <button
           type="button"
-          className="rounded-md border border-neutral-300 px-3 py-1.5 text-neutral-800 outline-none hover:bg-neutral-100 focus:ring-2 focus:ring-neutral-500 focus:ring-offset-1"
+          className="flex items-center gap-2 rounded-md border border-red-600 bg-red-50 px-3 py-1.5 font-medium text-neutral-900 outline-none hover:bg-red-100 focus:ring-2 focus:ring-red-600 focus:ring-offset-1"
           onClick={() => onChoose(false)}
         >
-          Just associate items
+          <span aria-hidden className="flex">
+            <StatusBadge status="extra" />
+          </span>
+          Mark as incorrect
         </button>
       </div>
     </div>

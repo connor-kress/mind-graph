@@ -16,7 +16,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { ESTIMATED_SIZE, layoutTree } from "../editor/layout";
 import { buildTree, type Size, type XY } from "../editor/tree";
 import type { ManualLink } from "../../convex/model";
-import { compareMaps, type CompareSummary } from "./compare";
+import { compareMaps, type CompareStatus, type CompareSummary } from "./compare";
 import { CompareNode, type CompareFlowNode } from "./CompareNode";
 import { LinkMenu } from "./LinkMenu";
 import { StatusBadge } from "./StatusBadge";
@@ -185,7 +185,7 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
     if (!result || !positions) return null;
     for (const node of result.nodes.values()) {
       const pos = positions.get(node.key);
-      if (node.status !== "missed" || !pos) continue;
+      if (!linkable(node.status) || !pos) continue;
       const { width, height } = sizeOrEstimate(node.key);
       const inside =
         point.x >= pos.x &&
@@ -213,7 +213,7 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
   };
   const chooseLink = (correct: boolean) => {
     const target = pending && result?.nodes.get(pending.targetKey);
-    const refKey = target?.status === "missed" ? target.refKey : undefined;
+    const refKey = target && linkable(target.status) ? target.refKey : undefined;
     const unchanged = links?.some(
       (l) => l.nodeKey === pending?.nodeKey && l.refKey === refKey && l.correct === correct,
     );
@@ -261,7 +261,10 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
   if (drag && draggedNode?.status !== "extra") setDrag(null);
   const pendingTarget = pending && result.nodes.get(pending.targetKey);
   const pendingDragged = pending && result.nodes.get(pending.nodeKey);
-  if (pending && (pendingTarget?.status !== "missed" || pendingDragged?.status !== "extra")) {
+  if (
+    pending &&
+    (!pendingTarget || !linkable(pendingTarget.status) || pendingDragged?.status !== "extra")
+  ) {
     closeMenu();
   }
 
@@ -297,7 +300,9 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
       id: node.key,
       source: node.parentKey,
       target: node.key,
-      className: node.status === "missed" || node.status === "belongs" ? "edge-missed" : undefined,
+      className: ["missed", "belongs", "intended"].includes(node.status)
+        ? "edge-missed"
+        : undefined,
     });
   }
 
@@ -377,6 +382,9 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
   );
 }
 
+/** Missed reference nodes, which red nodes can be linked to (replacing any link). */
+const linkable = (status: CompareStatus) => status === "missed" || status === "intended";
+
 const LEGEND: [keyof typeof STATUS_CLASSES, string][] = [
   ["recalled", "Recalled"],
   ["missed", "Missed"],
@@ -396,7 +404,7 @@ function Legend() {
         </span>
       ))}
       <span className="text-neutral-400">
-        Drag a red node onto a missed one to link them · Ctrl z to undo
+        Drag red nodes onto their intended node · Ctrl z to undo
       </span>
     </div>
   );

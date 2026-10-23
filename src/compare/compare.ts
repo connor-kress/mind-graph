@@ -7,6 +7,8 @@ export type CompareStatus =
   | "misplaced"
   /** Where a misplaced node belongs. */
   | "belongs"
+  /** Where a node marked incorrect, but placed elsewhere, was meant to go. */
+  | "intended"
   | "extra"
   | "missed";
 
@@ -194,14 +196,21 @@ export function compareMaps(
         label: shownLabel(node.key),
         ...(revealable(node.key) && { answer: node.label }),
       };
+      const inPlace = fitsUnder(node.key, ref.key);
+      const parentLabel = ref.parentKey ? reference.get(ref.parentKey)?.label : undefined;
       if (manual.get(node.key) === false) {
         extra++;
-        nodes.set(node.key, { ...matched, status: "extra" });
-      } else if (fitsUnder(node.key, ref.key)) {
+        nodes.set(node.key, {
+          ...matched,
+          status: "extra",
+          note: inPlace
+            ? undefined
+            : [{ em: node.label }, " is incorrect and belongs under ", { em: parentLabel ?? "" }],
+        });
+      } else if (inPlace) {
         nodes.set(node.key, { ...matched, status: "recalled" });
       } else {
         misplaced++;
-        const parentLabel = ref.parentKey ? reference.get(ref.parentKey)?.label : undefined;
         nodes.set(node.key, {
           ...matched,
           status: "misplaced",
@@ -220,7 +229,8 @@ export function compareMaps(
     if (!recalled) missed++;
     const key = slotKey(ref.key);
     if (key === attemptKey) continue;
-    const placedUnder = attemptKey && attempt.get(attemptKey)?.parentKey;
+    const placed = attemptKey ? attempt.get(attemptKey) : undefined;
+    const placedUnder = placed?.parentKey;
     nodes.set(key, {
       key,
       label: ref.label,
@@ -230,9 +240,15 @@ export function compareMaps(
       isRoot: false,
       refKey: ref.key,
       placedAt: attemptKey,
-      status: recalled ? "belongs" : "missed",
+      status: recalled ? "belongs" : placed ? "intended" : "missed",
+      // Marked incorrect, so it's named by what the student wrote.
       note: placedUnder
-        ? ["You placed ", { em: ref.label }, " under ", { em: shownLabel(placedUnder) }]
+        ? [
+            "You placed ",
+            { em: recalled ? ref.label : placed.label },
+            " under ",
+            { em: shownLabel(placedUnder) },
+          ]
         : undefined,
     });
   }

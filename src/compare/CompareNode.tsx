@@ -24,6 +24,7 @@ export type CompareFlowNode = Node<CompareNodeData, "compare">;
 const NOTE_CLASSES: Partial<Record<CompareStatus, string>> = {
   misplaced: "bg-yellow-700",
   belongs: "bg-yellow-700",
+  intended: "bg-red-700",
   extra: "bg-red-700",
 };
 
