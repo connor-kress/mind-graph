@@ -10,7 +10,7 @@ const MODES: { id: Mode; label: string }[] = [
 ];
 
 type Props = {
-  course?: string;
+  folder?: string | null;
   title?: string;
   mode: Mode;
   onModeChange: (mode: Mode) => void;
@@ -23,7 +23,7 @@ type Props = {
 };
 
 export function TopBar({
-  course,
+  folder,
   title,
   mode,
   onModeChange,
@@ -36,10 +36,23 @@ export function TopBar({
   return (
     <header className="flex h-13 shrink-0 items-center gap-3 border-b border-neutral-300 px-4">
       <h1 className="text-[17px] font-semibold">Mind Graph</h1>
-      {course && title && (
-        <span className="min-w-0 truncate text-sm text-neutral-500">
-          {course} / {title}
-        </span>
+      {title && (
+        <nav
+          aria-label="Breadcrumb"
+          className="flex min-w-0 items-center gap-2 text-[13px] text-neutral-500"
+        >
+          <span className="shrink-0">Library</span>
+          <span aria-hidden>/</span>
+          {folder && (
+            <>
+              <span className="truncate">{folder}</span>
+              <span aria-hidden>/</span>
+            </>
+          )}
+          <span aria-current="page" className="truncate font-semibold text-neutral-900">
+            {title}
+          </span>
+        </nav>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-3">
         {status && <span className="text-sm font-medium text-neutral-800">{status}</span>}
