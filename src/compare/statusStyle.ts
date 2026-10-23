@@ -5,6 +5,7 @@ export const STATUS_CLASSES: Record<CompareStatus, string> = {
   recalled: "border-green-600 bg-green-50 text-neutral-900",
   misplaced: "border-yellow-500 bg-yellow-50 font-semibold text-neutral-900",
   belongs: "border-dashed border-yellow-500 bg-yellow-50/60 italic text-neutral-600",
+  intended: "border-dashed border-red-600 bg-red-50 italic text-neutral-600",
   extra: "border-red-600 bg-red-50 text-neutral-900",
   missed: "border-dashed border-neutral-400 bg-white/60 italic text-neutral-500",
 };
