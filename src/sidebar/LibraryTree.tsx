@@ -1,44 +1,40 @@
 import type { FunctionReturnType } from "convex/server";
-import { useEffect, useState } from "react";
 import type { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { ChevronIcon, FolderIcon, MapIcon, MoreIcon } from "./icons";
+import { ChevronIcon, FolderIcon, MapIcon, MoreIcon, PlusIcon } from "./icons";
 import { COMING_SOON } from "./mockData";
-import { RowAction, SidebarRow } from "./SidebarRow";
+import { RenameField, RowAction, SidebarRow } from "./SidebarRow";
 
 export type Library = FunctionReturnType<typeof api.library.list>;
-
-// Collapsed folders are remembered, so new folders start out expanded.
-const COLLAPSED_STORAGE_KEY = "mind-graph:collapsed-folders";
-
-function loadCollapsed(): Set<string> {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(COLLAPSED_STORAGE_KEY) ?? "[]"));
-  } catch {
-    return new Set();
-  }
-}
 
 type Props = {
   library: Library;
   activeTopicId?: Id<"topics">;
   onOpenMap: (topicId: Id<"topics">) => void;
+  collapsed: Set<string>;
+  onFolderOpenChange: (folderId: Id<"folders">, open: boolean) => void;
+  onNewMap: (folderId: Id<"folders">) => void;
+  /** The folder or map being renamed. */
+  renamingId: string | null;
+  onRenamingChange: (id: string | null) => void;
+  onRenameFolder: (folderId: Id<"folders">, name: string) => void;
+  onRenameMap: (topicId: Id<"topics">, title: string) => void;
 };
 
 /** The library's folders, each expandable to list its maps. */
-export function LibraryTree({ library, activeTopicId, onOpenMap }: Props) {
-  const [collapsed, setCollapsed] = useState(loadCollapsed);
-  useEffect(
-    () => localStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify([...collapsed])),
-    [collapsed],
-  );
-  const toggle = (id: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
-
+export function LibraryTree({
+  library,
+  activeTopicId,
+  onOpenMap,
+  collapsed,
+  onFolderOpenChange,
+  onNewMap,
+  renamingId,
+  onRenamingChange,
+  onRenameFolder,
+  onRenameMap,
+}: Props) {
+  const stopRenaming = () => onRenamingChange(null);
   return (
     <ul className="space-y-0.5">
       {library.map((folder) => {
@@ -53,11 +49,33 @@ export function LibraryTree({ library, activeTopicId, onOpenMap }: Props) {
               }
               icon={<FolderIcon />}
               label={folder.name}
-              onClick={() => toggle(folder._id)}
+              onClick={() => onFolderOpenChange(folder._id, !open)}
+              onDoubleClick={() => onRenamingChange(folder._id)}
+              editor={
+                renamingId === folder._id && (
+                  <RenameField
+                    initial={folder.name}
+                    label="Folder name"
+                    onSubmit={(name) => {
+                      onRenameFolder(folder._id, name);
+                      stopRenaming();
+                    }}
+                    onCancel={stopRenaming}
+                  />
+                )
+              }
               trailing={
-                <RowAction label={COMING_SOON}>
-                  <MoreIcon className="size-3.5" />
-                </RowAction>
+                <>
+                  <RowAction label={COMING_SOON}>
+                    <MoreIcon className="size-3.5" />
+                  </RowAction>
+                  <RowAction
+                    label={`New map in ${folder.name}`}
+                    onClick={() => onNewMap(folder._id)}
+                  >
+                    <PlusIcon className="size-3.5" />
+                  </RowAction>
+                </>
               }
             />
             {open && (
@@ -70,6 +88,20 @@ export function LibraryTree({ library, activeTopicId, onOpenMap }: Props) {
                       label={map.title}
                       active={map._id === activeTopicId}
                       onClick={() => onOpenMap(map._id)}
+                      onDoubleClick={() => onRenamingChange(map._id)}
+                      editor={
+                        renamingId === map._id && (
+                          <RenameField
+                            initial={map.title}
+                            label="Map name"
+                            onSubmit={(title) => {
+                              onRenameMap(map._id, title);
+                              stopRenaming();
+                            }}
+                            onCancel={stopRenaming}
+                          />
+                        )
+                      }
                     />
                   </li>
                 ))}

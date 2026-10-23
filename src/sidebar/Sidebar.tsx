@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { useMutation } from "convex/react";
+import { useState, type ReactNode } from "react";
+import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { Logo } from "../components/Logo";
 import {
@@ -7,6 +9,7 @@ import {
   CollapseIcon,
   GroupIcon,
   MapIcon,
+  PlusIcon,
   RecallIcon,
   SearchIcon,
   SettingsIcon,
@@ -15,7 +18,10 @@ import {
 } from "./icons";
 import { LibraryTree, type Library } from "./LibraryTree";
 import { COMING_SOON, mockDueCount, mockProfile, mockSharedGroups } from "./mockData";
-import { SidebarRow } from "./SidebarRow";
+import { RowAction, SidebarRow } from "./SidebarRow";
+import { useCollapsedFolders } from "./useCollapsedFolders";
+
+const NEW_FOLDER_NAME = "Untitled folder";
 
 type Props = {
   open: boolean;
@@ -23,10 +29,67 @@ type Props = {
   library?: Library;
   activeTopicId?: Id<"topics">;
   onOpenMap: (topicId: Id<"topics">) => void;
+  onError: (message: string) => void;
 };
 
 /** The collapsible navigation sidebar: library, shared maps, and account. */
-export function Sidebar({ open, onToggle, library, activeTopicId, onOpenMap }: Props) {
+export function Sidebar({ open, onToggle, library, activeTopicId, onOpenMap, onError }: Props) {
+  const { collapsed, setOpen } = useCollapsedFolders();
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const createFolder = useMutation(api.library.createFolder);
+  const createMap = useMutation(api.library.createMap);
+  // Renames show in the library right away.
+  const renameFolder = useMutation(api.library.renameFolder).withOptimisticUpdate(
+    (store, { folderId, name }) => {
+      const current = store.getQuery(api.library.list, {});
+      if (!current) return;
+      store.setQuery(
+        api.library.list,
+        {},
+        current.map((f) => (f._id === folderId ? { ...f, name } : f)),
+      );
+    },
+  );
+  const renameMap = useMutation(api.library.renameMap).withOptimisticUpdate(
+    (store, { topicId, title }) => {
+      const current = store.getQuery(api.library.list, {});
+      if (!current) return;
+      store.setQuery(
+        api.library.list,
+        {},
+        current.map((f) => ({
+          ...f,
+          maps: f.maps.map((m) => (m._id === topicId ? { ...m, title } : m)),
+        })),
+      );
+    },
+  );
+
+  /** Creates a map in a folder, opens it, and starts naming it. */
+  const newMap = async (folderId?: Id<"folders">) => {
+    try {
+      folderId ??= await createFolder({ name: NEW_FOLDER_NAME });
+      const topicId = await createMap({ folderId });
+      setOpen(folderId, true);
+      onOpenMap(topicId);
+      setRenamingId(topicId);
+    } catch {
+      onError("Couldn't create the map");
+    }
+  };
+
+  const newFolder = async () => {
+    try {
+      setRenamingId(await createFolder({ name: NEW_FOLDER_NAME }));
+    } catch {
+      onError("Couldn't create the folder");
+    }
+  };
+
+  // New maps go in the open map's folder, or the first one.
+  const currentFolderId =
+    library?.find((f) => f.maps.some((m) => m._id === activeTopicId))?._id ?? library?.[0]?._id;
+
   return (
     <aside
       aria-label="Sidebar"
@@ -63,6 +126,17 @@ export function Sidebar({ open, onToggle, library, activeTopicId, onOpenMap }: P
           <span className="kbd ml-auto border-neutral-200 bg-white px-1.5">Ctrl K</span>
         </button>
 
+        <button
+          type="button"
+          disabled={!library}
+          onClick={() => newMap(currentFolderId)}
+          onMouseDown={(e) => e.preventDefault()}
+          className="mx-2 mt-2 flex h-8.5 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-accent text-sm font-semibold text-white hover:bg-accent/90"
+        >
+          <PlusIcon />
+          New map
+        </button>
+
         <div className="mt-4 space-y-0.5">
           <SidebarRow icon={<ClockIcon />} label="Recent" title={COMING_SOON} />
           <SidebarRow
@@ -78,10 +152,36 @@ export function Sidebar({ open, onToggle, library, activeTopicId, onOpenMap }: P
         </div>
 
         <nav aria-label="Maps" className="mt-5 min-h-0 flex-1 overflow-y-auto pb-4">
-          <SectionHeading>Library</SectionHeading>
+          <SectionHeading
+            action={
+              <RowAction label="New folder" visible onClick={newFolder}>
+                <PlusIcon className="size-3.5" />
+              </RowAction>
+            }
+          >
+            Library
+          </SectionHeading>
           {library && (
-            <LibraryTree library={library} activeTopicId={activeTopicId} onOpenMap={onOpenMap} />
+            <LibraryTree
+              library={library}
+              activeTopicId={activeTopicId}
+              onOpenMap={onOpenMap}
+              collapsed={collapsed}
+              onFolderOpenChange={setOpen}
+              onNewMap={newMap}
+              renamingId={renamingId}
+              onRenamingChange={setRenamingId}
+              onRenameFolder={(folderId, name) =>
+                renameFolder({ folderId, name }).catch(() => onError("Couldn't rename the folder"))
+              }
+              onRenameMap={(topicId, title) =>
+                renameMap({ topicId, title }).catch(() => onError("Couldn't rename the map"))
+              }
+            />
           )}
+          <div className="mt-0.5">
+            <SidebarRow muted icon={<PlusIcon />} label="New folder" onClick={newFolder} />
+          </div>
 
           <SectionHeading className="mt-5">Shared</SectionHeading>
           <ul className="space-y-0.5">
