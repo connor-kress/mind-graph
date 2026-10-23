@@ -185,12 +185,15 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
   }, []);
 
   const sizeOrEstimate = (key: string) => sizes.get(key) ?? ESTIMATED_SIZE;
-  /** The missed node under a point, which a red node can be dropped onto. */
-  const missedAt = (point: XY) => {
+  /**
+   * The node laid out under a point, if any, among those `accept`ed. A dragged
+   * node counts as where it was laid out, which its split-off copy marks.
+   */
+  const nodeAt = (point: XY, accept: (node: ComparedNode) => boolean = () => true) => {
     if (!result || !positions) return null;
     for (const node of result.nodes.values()) {
       const pos = positions.get(node.key);
-      if (!linkable(node.status) || !pos) continue;
+      if (!accept(node) || !pos) continue;
       const { width, height } = sizeOrEstimate(node.key);
       const inside =
         point.x >= pos.x &&
@@ -201,16 +204,27 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
     }
     return null;
   };
+  /** The missed node under a point, which a red node can be dropped onto. */
+  const missedAt = (point: XY) => nodeAt(point, (node) => linkable(node.status));
   // The dragged node's position comes from onNodesChange; these find the target.
   const onNodeDrag: OnNodeDrag<CompareFlowNode> = (e) => {
     const target = missedAt(flow.screenToFlowPosition(clientPoint(e)));
     setDrag((prev) => prev && { ...prev, target });
   };
   const onNodeDragStop: OnNodeDrag<CompareFlowNode> = (e, node) => {
-    const target = missedAt(flow.screenToFlowPosition(clientPoint(e)));
+    const point = flow.screenToFlowPosition(clientPoint(e));
+    const target = missedAt(point);
     // The node goes back while the menu is open, so the target stays visible.
     setDrag(null);
-    if (target && drag) setPending({ nodeKey: node.id, targetKey: target });
+    if (!drag) return;
+    if (target) setPending({ nodeKey: node.id, targetKey: target });
+    // A node split off from its link and dropped on the background is unlinked.
+    else if (splitsOff(result?.nodes.get(node.id)) && !nodeAt(point) && links) {
+      changeLinks(
+        links.filter((l) => l.nodeKey !== node.id),
+        links,
+      );
+    }
   };
   const closeMenu = () => {
     setPending(null);
@@ -276,8 +290,31 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
     closeMenu();
   }
 
+  // A linked node in place splits off when dragged, leaving its spot missed.
+  const split = drag && draggedNode && splitsOff(draggedNode) ? draggedNode : null;
+  const splitKey = split && `split:${split.key}`;
   const flowNodes: CompareFlowNode[] = [...result.nodes.values()].map((node) => {
     const dragging = drag?.key === node.key;
+    if (dragging && split) {
+      return {
+        id: node.key,
+        type: "compare",
+        position: drag.position,
+        measured: sizes.get(node.key),
+        draggable: true,
+        selectable: false,
+        zIndex: 1000,
+        data: {
+          label: split.answer ?? split.label,
+          status: "extra",
+          linked: false,
+          revealed: false,
+          selected: false,
+          dropTarget: false,
+          dragging,
+        },
+      };
+    }
     return {
       id: node.key,
       type: "compare",
@@ -301,17 +338,46 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
     };
   });
 
+  if (split && splitKey) {
+    flowNodes.push({
+      id: splitKey,
+      type: "compare",
+      position: positions.get(split.key) ?? { x: 0, y: 0 },
+      measured: sizes.get(splitKey),
+      draggable: false,
+      selectable: false,
+      data: {
+        label: split.label,
+        status: "missed",
+        linked: false,
+        revealed: false,
+        selected: false,
+        dropTarget: false,
+        dragging: false,
+      },
+    });
+  }
+
+  // While a node is split off, its spot takes its edges (and the node gets
+  // a new one from its parent).
+  const edgeEnd = (key: string) => (split && splitKey && key === split.key ? splitKey : key);
   const edges: Edge[] = [];
   for (const node of result.nodes.values()) {
     if (!node.parentKey || !tree.depth.has(node.key)) continue;
+    const missed = split?.key === node.key;
     edges.push({
       id: node.key,
-      source: node.parentKey,
-      target: node.key,
-      className: ["missed", "belongs", "intended"].includes(node.status)
-        ? "edge-missed"
-        : undefined,
+      source: edgeEnd(node.parentKey),
+      target: edgeEnd(node.key),
+      className:
+        missed || ["missed", "belongs", "intended"].includes(node.status)
+          ? "edge-missed"
+          : undefined,
     });
+  }
+  // The dragged node stays attached to its parent, like any other dragged node.
+  if (split?.parentKey && splitKey) {
+    edges.push({ id: splitKey, source: split.parentKey, target: split.key });
   }
 
   let menu = null;
@@ -389,6 +455,9 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
     </div>
   );
 }
+
+/** Linked by hand under the right parent, so dragging it splits it from its spot. */
+const splitsOff = (node: ComparedNode | undefined) => node?.answer !== undefined;
 
 /** Red nodes, and ones linked by hand (to change their link), can be dragged. */
 const draggable = (node: ComparedNode) => node.status === "extra" || !!node.manual;
