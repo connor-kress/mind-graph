@@ -266,6 +266,7 @@ export default function App() {
         library={library}
         activeTopicId={workspace?.topic._id}
         onOpenMap={openMap}
+        onError={setError}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar
