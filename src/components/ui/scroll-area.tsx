@@ -15,9 +15,11 @@ function ScrollArea({
       className={cn("relative", className)}
       {...props}
     >
+      {/* Radix wraps children in a `display: table` div that grows with its widest
+          line; as a block, long text truncates or wraps at the viewport's width. */}
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
+        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 [&>div]:block!"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
