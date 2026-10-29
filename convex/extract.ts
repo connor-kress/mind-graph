@@ -11,6 +11,8 @@ import { gfm } from "micromark-extension-gfm";
 import { HTMLElement, parse, type Node } from "node-html-parser";
 import { internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
+import { pdfBlocks } from "./extractPdf";
+import { slideBlocks } from "./extractSlides";
 import type { Block, ListItem, SourceKind } from "./model";
 
 /** Extracts a source's text, keeping its headings and lists, and stores it as JSON. */
@@ -19,26 +21,33 @@ export const run = internalAction({
   handler: async (ctx, { sourceId }) => {
     const source = await ctx.runQuery(internal.sources.forExtraction, { sourceId });
     if (!source) return;
-    let contentId;
+    let contentId, pageCount;
     try {
       const file = await ctx.storage.get(source.storageId);
       if (!file) throw new Error("File missing from storage");
-      const blocks = await extract(source.kind, file);
-      if (blocks) {
-        const json = new Blob([JSON.stringify(blocks)], { type: "application/json" });
-        contentId = await ctx.storage.store(json);
-      }
+      const content = await extract(source.kind, file);
+      const json = new Blob([JSON.stringify(content.blocks)], { type: "application/json" });
+      contentId = await ctx.storage.store(json);
+      pageCount = content.pageCount;
     } catch (error) {
       console.error(`Couldn't extract source ${sourceId}`, error);
       await ctx.runMutation(internal.sources.finish, { sourceId, failed: true });
       return;
     }
-    await ctx.runMutation(internal.sources.finish, { sourceId, failed: false, contentId });
+    await ctx.runMutation(internal.sources.finish, {
+      sourceId,
+      failed: false,
+      contentId,
+      pageCount,
+    });
   },
 });
 
-/** A file's blocks, or null for kinds that can only be opened as originals (for now). */
-async function extract(kind: SourceKind, file: Blob): Promise<Block[] | null> {
+/** A file's blocks, and its number of pages or slides if it has them. */
+async function extract(
+  kind: SourceKind,
+  file: Blob,
+): Promise<{ blocks: Block[]; pageCount?: number }> {
   switch (kind) {
     case "md": {
       // With GitHub's extensions, for tables.
@@ -46,24 +55,27 @@ async function extract(kind: SourceKind, file: Blob): Promise<Block[] | null> {
         extensions: [gfm()],
         mdastExtensions: [gfmFromMarkdown()],
       });
-      return fromMdast(tree.children);
+      return { blocks: fromMdast(tree.children) };
     }
-    case "txt":
-      return (await file.text())
+    case "txt": {
+      const blocks: Block[] = (await file.text())
         .replace(/\r\n?/g, "\n")
         .split(/\n\s*\n/)
         .map((text) => text.trim())
         .filter(Boolean)
         .map((text) => ({ type: "paragraph", text }));
+      return { blocks };
+    }
     case "docx": {
       // Mammoth maps Word's heading styles to <h1>–<h6>.
       const buffer = Buffer.from(await file.arrayBuffer());
       const { value } = await mammoth.convertToHtml({ buffer });
-      return fromHtml(parse(value).childNodes);
+      return { blocks: fromHtml(parse(value).childNodes) };
     }
     case "pdf":
+      return pdfBlocks(new Uint8Array(await file.arrayBuffer()));
     case "pptx":
-      return null;
+      return slideBlocks(new Uint8Array(await file.arrayBuffer()));
   }
 }
 
