@@ -14,6 +14,19 @@ pnpm dev          # Vite dev server
 
 The first `pnpm dev:convex` run configures a dev deployment and writes `.env.local`. The app seeds a demo topic on first load.
 
+## Account components
+
+Standalone Clerk components are available for the upcoming sidebar integration. They are not mounted in the app yet and do not change Convex authentication or map access.
+
+- `AccountProvider` supplies Clerk context. Set `VITE_CLERK_PUBLISHABLE_KEY` in `.env.local` before mounting it.
+- `AccountGate` shows Clerk's sign-in screen with a sign-up link, then renders its children once signed in.
+- `AccountButtons` opens sign-in or sign-up in a modal.
+- `AccountMenu` displays the current user and Clerk's menu for profile, account security, sessions, and sign-out. Its `compact` option shows only the avatar.
+
+A Clerk application has not been selected for Mind Graph. Create a dedicated Mind Graph workspace and application before linking this checkout or fetching keys.
+
+The browser only needs the publishable key. Never expose `CLERK_SECRET_KEY` through a `VITE_` variable. See `.env.example` for the local environment shape. The UI components do not enforce backend access. Convex authentication and ownership checks will be added separately on `feat/sidebar`.
+
 ## Editing the map
 
 | Action            | How                                                                                                                                |
