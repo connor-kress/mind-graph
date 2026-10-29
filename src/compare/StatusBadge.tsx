@@ -10,6 +10,7 @@ const BADGES: Partial<Record<CompareStatus, Badge>> = {
   recalled: { label: "Recalled", circle: "bg-green-600 text-white", path: CHECK },
   misplaced: { label: "Wrong parent", circle: "bg-yellow-400 text-neutral-900", path: PARTIAL },
   belongs: { label: "Where it belongs", circle: "bg-yellow-400 text-neutral-900", path: PARTIAL },
+  intended: { label: "Missed", circle: "bg-red-600 text-white", path: CROSS },
   extra: { label: "Not in reference", circle: "bg-red-600 text-white", path: CROSS },
   missed: { label: "Missed", circle: "bg-red-600 text-white", path: CROSS },
 };
