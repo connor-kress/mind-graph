@@ -9,12 +9,15 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as extract from "../extract.js";
 import type * as library from "../library.js";
 import type * as links from "../links.js";
+import type * as migrations from "../migrations.js";
 import type * as model from "../model.js";
 import type * as nodes from "../nodes.js";
 import type * as projectMigration from "../projectMigration.js";
 import type * as seedData from "../seedData.js";
+import type * as sources from "../sources.js";
 import type * as workspace from "../workspace.js";
 
 import type {
@@ -25,12 +28,15 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  extract: typeof extract;
   library: typeof library;
   links: typeof links;
+  migrations: typeof migrations;
   model: typeof model;
   nodes: typeof nodes;
   projectMigration: typeof projectMigration;
   seedData: typeof seedData;
+  sources: typeof sources;
   workspace: typeof workspace;
 }>;
 
