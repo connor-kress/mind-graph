@@ -2,7 +2,7 @@
 
 Concept mapping with built-in recall practice. Build a reference map with your notes open, rebuild it from memory in Recall mode, then compare the two to see what you missed.
 
-Built with Vite, React, [React Flow](https://reactflow.dev), [Convex](https://convex.dev), and [Clerk](https://clerk.com).
+Built with Vite, React, [React Flow](https://reactflow.dev), [shadcn/ui](https://ui.shadcn.com), [Convex](https://convex.dev), and [Clerk](https://clerk.com).
 
 ## Development
 
@@ -25,6 +25,8 @@ pnpm build
 pnpm lint
 pnpm exec tsc -p convex/tsconfig.json --noEmit
 ```
+
+The sidebar supports map search with `Ctrl`/`Cmd` + `K` and collapses with `Ctrl`/`Cmd` + `\`. Folder and map actions are available from their menus or a right-click.
 
 ## Editing the map
 

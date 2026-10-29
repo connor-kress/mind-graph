@@ -1,120 +1,196 @@
 import type { FunctionReturnType } from "convex/server";
+import {
+  ChevronRight,
+  FileText,
+  Folder,
+  FolderOpen,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+} from "lucide-react";
 import type { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { ChevronIcon, FolderIcon, MapIcon, MoreIcon, PlusIcon } from "./icons";
-import { COMING_SOON } from "./mockData";
-import { RenameField, RowAction, SidebarRow } from "./SidebarRow";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "../components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
+import {
+  SidebarMenu,
+  SidebarMenuAction,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubItem,
+} from "../components/ui/sidebar";
 
 export type Library = FunctionReturnType<typeof api.library.list>;
-
+export type RenameTarget =
+  | { kind: "folder"; id: Id<"folders">; name: string }
+  | { kind: "map"; id: Id<"topics">; name: string };
 type Props = {
   library: Library;
   activeTopicId?: Id<"topics">;
-  onOpenMap: (topicId: Id<"topics">) => void;
   collapsed: Set<string>;
-  onFolderOpenChange: (folderId: Id<"folders">, open: boolean) => void;
-  onNewMap: (folderId: Id<"folders">) => void;
-  /** The folder or map being renamed. */
-  renamingId: string | null;
-  onRenamingChange: (id: string | null) => void;
-  onRenameFolder: (folderId: Id<"folders">, name: string) => void;
-  onRenameMap: (topicId: Id<"topics">, title: string) => void;
+  onFolderOpenChange: (id: string, open: boolean) => void;
+  onOpenMap: (id: Id<"topics">) => void;
+  onNewMap: (id: Id<"folders">) => void;
+  onRename: (target: RenameTarget) => void;
+  busy: boolean;
 };
 
-/** The library's folders, each expandable to list its maps. */
 export function LibraryTree({
   library,
   activeTopicId,
-  onOpenMap,
   collapsed,
   onFolderOpenChange,
+  onOpenMap,
   onNewMap,
-  renamingId,
-  onRenamingChange,
-  onRenameFolder,
-  onRenameMap,
+  onRename,
+  busy,
 }: Props) {
-  const stopRenaming = () => onRenamingChange(null);
   return (
-    <ul className="space-y-0.5">
+    <SidebarMenu>
       {library.map((folder) => {
         const open = !collapsed.has(folder._id);
+        const renameFolder = () => onRename({ kind: "folder", id: folder._id, name: folder.name });
         return (
-          <li key={folder._id}>
-            <SidebarRow
-              leading={
-                <span className="flex w-3.5 justify-center text-neutral-500">
-                  <ChevronIcon open={open} />
-                </span>
-              }
-              icon={<FolderIcon />}
-              label={folder.name}
-              onClick={() => onFolderOpenChange(folder._id, !open)}
-              onDoubleClick={() => onRenamingChange(folder._id)}
-              editor={
-                renamingId === folder._id && (
-                  <RenameField
-                    initial={folder.name}
-                    label="Folder name"
-                    onSubmit={(name) => {
-                      onRenameFolder(folder._id, name);
-                      stopRenaming();
-                    }}
-                    onCancel={stopRenaming}
-                  />
-                )
-              }
-              trailing={
-                <>
-                  <RowAction label={COMING_SOON}>
-                    <MoreIcon className="size-3.5" />
-                  </RowAction>
-                  <RowAction
-                    label={`New map in ${folder.name}`}
-                    onClick={() => onNewMap(folder._id)}
+          <Collapsible
+            key={folder._id}
+            open={open}
+            onOpenChange={(next) => onFolderOpenChange(folder._id, next)}
+            asChild
+          >
+            <SidebarMenuItem>
+              <ContextMenu>
+                <ContextMenuTrigger asChild>
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuButton onDoubleClick={renameFolder} className="h-9 pr-8">
+                      <ChevronRight
+                        className={`size-3.5 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+                      />
+                      {open ? <FolderOpen /> : <Folder />}
+                      <span>{folder.name}</span>
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                </ContextMenuTrigger>
+                <ContextMenuContent
+                  className="w-44 whitespace-nowrap"
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <ContextMenuItem disabled={busy} onSelect={() => onNewMap(folder._id)}>
+                    <Plus />
+                    New map
+                  </ContextMenuItem>
+                  <ContextMenuItem onSelect={renameFolder}>
+                    <Pencil />
+                    Rename folder
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <SidebarMenuAction
+                    showOnHover
+                    aria-label={`Actions for ${folder.name}`}
+                    className="top-2"
                   >
-                    <PlusIcon className="size-3.5" />
-                  </RowAction>
-                </>
-              }
-            />
-            {open && (
-              <ul className="mt-0.5 space-y-0.5">
-                {folder.maps.map((map) => (
-                  <li key={map._id}>
-                    <SidebarRow
-                      nested
-                      icon={<MapIcon />}
-                      label={map.title}
-                      active={map._id === activeTopicId}
-                      onClick={() => onOpenMap(map._id)}
-                      onDoubleClick={() => onRenamingChange(map._id)}
-                      editor={
-                        renamingId === map._id && (
-                          <RenameField
-                            initial={map.title}
-                            label="Map name"
-                            onSubmit={(title) => {
-                              onRenameMap(map._id, title);
-                              stopRenaming();
-                            }}
-                            onCancel={stopRenaming}
-                          />
-                        )
-                      }
-                    />
-                  </li>
-                ))}
-                {folder.maps.length === 0 && (
-                  <li className="mx-2 flex h-7.5 items-center pl-11 text-sm text-neutral-400">
-                    No maps yet
-                  </li>
-                )}
-              </ul>
-            )}
-          </li>
+                    <MoreHorizontal />
+                  </SidebarMenuAction>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  className="w-44 whitespace-nowrap"
+                  side="right"
+                  align="start"
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <DropdownMenuItem disabled={busy} onSelect={() => onNewMap(folder._id)}>
+                    <Plus />
+                    New map
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={renameFolder}>
+                    <Pencil />
+                    Rename folder
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <CollapsibleContent>
+                <SidebarMenuSub className="mr-0 pr-0">
+                  {folder.maps.map((map) => {
+                    const renameMap = () => onRename({ kind: "map", id: map._id, name: map.title });
+                    return (
+                      <SidebarMenuSubItem key={map._id}>
+                        <ContextMenu>
+                          <ContextMenuTrigger asChild>
+                            <SidebarMenuButton
+                              className="h-8 pr-8 text-[13px]"
+                              isActive={map._id === activeTopicId}
+                              aria-current={map._id === activeTopicId ? "page" : undefined}
+                              onClick={() => onOpenMap(map._id)}
+                              onDoubleClick={renameMap}
+                            >
+                              <FileText className="text-muted-foreground" />
+                              <span>{map.title}</span>
+                            </SidebarMenuButton>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent
+                            className="w-44 whitespace-nowrap"
+                            onKeyDown={(e) => e.stopPropagation()}
+                          >
+                            <ContextMenuItem onSelect={renameMap}>
+                              <Pencil />
+                              Rename map
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <SidebarMenuAction showOnHover aria-label={`Actions for ${map.title}`}>
+                              <MoreHorizontal />
+                            </SidebarMenuAction>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            className="w-44 whitespace-nowrap"
+                            side="right"
+                            align="start"
+                            onKeyDown={(e) => e.stopPropagation()}
+                          >
+                            <DropdownMenuItem onSelect={renameMap}>
+                              <Pencil />
+                              Rename map
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </SidebarMenuSubItem>
+                    );
+                  })}
+                  {folder.maps.length === 0 && (
+                    <li className="px-2 py-2 text-xs text-muted-foreground">No maps yet</li>
+                  )}
+                  <SidebarMenuSubItem>
+                    <SidebarMenuButton
+                      className="h-8 text-xs text-muted-foreground"
+                      disabled={busy}
+                      onClick={() => onNewMap(folder._id)}
+                    >
+                      <Plus />
+                      <span>New map</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuSubItem>
+                </SidebarMenuSub>
+              </CollapsibleContent>
+            </SidebarMenuItem>
+          </Collapsible>
         );
       })}
-    </ul>
+    </SidebarMenu>
   );
 }

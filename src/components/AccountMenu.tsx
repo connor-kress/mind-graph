@@ -1,32 +1,71 @@
-import { UserButton, useClerk, useUser } from "@clerk/react";
+import { useClerk, useUser } from "@clerk/react";
+import { ChevronsUpDown, LogOut, Settings } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import { Button } from "./ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 
-/** Clerk manages profile edits, account security, sessions, and sign-out. */
+/** Clerk owns profile details, security, and sessions. */
 export function AccountMenu({ compact = false }: { compact?: boolean }) {
   const { user } = useUser();
-  const { openUserProfile } = useClerk();
+  const { openUserProfile, signOut } = useClerk();
   if (!user) return null;
   const name = user.fullName?.trim() || user.username?.trim();
   const email = user.primaryEmailAddress?.emailAddress;
   const label = name || email || "Manage account";
   return (
-    <div
-      className={`flex items-center gap-2.5 ${compact ? "" : "mx-3 border-t border-neutral-200 py-4 pl-1"}`}
-    >
-      <UserButton />
-      {!compact && (
-        <button
-          type="button"
-          onClick={() => openUserProfile()}
-          title="Manage account"
-          aria-label={`Manage account for ${label}`}
-          className="min-w-0 flex-1 cursor-pointer rounded-md text-left outline-none hover:text-accent focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          className={
+            compact
+              ? "size-9 rounded-lg p-1"
+              : "h-auto w-full justify-start gap-3 px-2 py-2.5 text-left"
+          }
+          aria-label={`Account menu for ${label}`}
         >
-          <div className="truncate text-[13px] font-semibold">{label}</div>
-          <div className="truncate text-xs text-neutral-500">
-            {name && email ? email : "Manage account"}
-          </div>
-        </button>
-      )}
-    </div>
+          <Avatar className="size-8 rounded-lg">
+            <AvatarImage src={user.imageUrl} alt="" />
+            <AvatarFallback>{label.slice(0, 1).toUpperCase()}</AvatarFallback>
+          </Avatar>
+          {!compact && (
+            <>
+              <span className="grid min-w-0 flex-1 gap-0.5">
+                <span className="truncate text-sm font-medium">{label}</span>
+                <span className="truncate text-xs font-normal text-muted-foreground">
+                  {name && email ? email : "Manage account"}
+                </span>
+              </span>
+              <ChevronsUpDown className="size-4 text-muted-foreground" />
+            </>
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side={compact ? "bottom" : "top"}
+        align="end"
+        className="w-64"
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <DropdownMenuLabel className="truncate">{email || label}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => openUserProfile()}>
+          <Settings />
+          Account settings
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => void signOut({ redirectUrl: "/" })}>
+          <LogOut />
+          Sign out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

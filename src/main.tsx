@@ -8,15 +8,19 @@ import App from "./App.tsx";
 import { AccountProvider } from "./components/AccountProvider";
 import { AccountGate } from "./components/AccountGate";
 
+import { TooltipProvider } from "./components/ui/tooltip";
+
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <AccountProvider>
       <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
-        <AccountGate>
-          <App />
-        </AccountGate>
+        <TooltipProvider>
+          <AccountGate>
+            <App />
+          </AccountGate>
+        </TooltipProvider>
       </ConvexProviderWithClerk>
     </AccountProvider>
   </StrictMode>,
