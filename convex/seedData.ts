@@ -9,6 +9,11 @@ export type SeedMap = {
 
 export type SeedProject = { name: string; maps: SeedMap[] };
 
+/** Inline notes (the format topics used before sources) as Markdown. */
+export function notesMarkdown(notes: SeedMap["notes"]) {
+  return [`# ${notes.heading}`, ...notes.paragraphs].join("\n\n") + "\n";
+}
+
 export const demoLibrary: SeedProject[] = [
   {
     name: "Example Project",

@@ -6,8 +6,9 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { demoLibrary, type SeedNode } from "./seedData";
+import { demoLibrary, notesMarkdown, type SeedNode } from "./seedData";
 import { requireUser, requireTopic, requireMap, memberProjects, projectMembership } from "./auth";
 
 import {
@@ -89,7 +90,11 @@ export const seed = mutation({
         const topicId = await ctx.db.insert("topics", {
           projectId,
           title: map.title,
-          notes: map.notes,
+        });
+        await ctx.scheduler.runAfter(0, internal.sources.importText, {
+          topicId,
+          name: `${map.notes.heading}.md`,
+          text: notesMarkdown(map.notes),
         });
         const mapId = await ctx.db.insert("maps", { topicId, kind: "reference" });
         await insertTree(ctx, mapId, { label: map.title, children: map.children }, undefined, 0);
