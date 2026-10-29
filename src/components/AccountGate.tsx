@@ -40,8 +40,10 @@ export function AccountGate({ children }: { children: ReactNode }) {
         </div>
       ) : (
         <>
-          <p className="text-sm text-neutral-600">Sign in to build maps and practice recall.</p>
-          <SignIn routing="hash" />
+          <p className="text-sm text-neutral-600">
+            Sign in or create an account to build maps and practice recall.
+          </p>
+          <SignIn routing="hash" withSignUp />
         </>
       )}
     </main>
