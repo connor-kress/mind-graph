@@ -23,7 +23,13 @@ Standalone Clerk components are available for the upcoming sidebar integration. 
 - `AccountButtons` opens sign-in or sign-up in a modal.
 - `AccountMenu` displays the current user and Clerk's menu for profile, account security, sessions, and sign-out. Its `compact` option shows only the avatar.
 
-A Clerk application has not been selected for Mind Graph. Create a dedicated Mind Graph workspace and application before linking this checkout or fetching keys.
+The Mind Graph Clerk application is in the dedicated Mind Graph workspace. Authorize the CLI for that workspace, then link the application and fetch development keys:
+
+```sh
+clerk auth login
+clerk link --app app_3LNFscjNO00bK4AxmaH94B0UhAj
+clerk env pull --instance dev
+```
 
 The browser only needs the publishable key. Never expose `CLERK_SECRET_KEY` through a `VITE_` variable. See `.env.example` for the local environment shape. The UI components do not enforce backend access. Convex authentication and ownership checks will be added separately on `feat/sidebar`.
 
