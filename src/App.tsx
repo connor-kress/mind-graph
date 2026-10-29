@@ -13,6 +13,19 @@ import { TopBar, type Mode } from "./components/TopBar";
 import { isTextInput } from "./editor/isTextInput";
 import { MapEditor } from "./editor/MapEditor";
 import { Sidebar } from "./sidebar/Sidebar";
+import { Button } from "./components/ui/button";
+import { SidebarProvider, SidebarInset } from "./components/ui/sidebar";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./components/ui/alert-dialog";
+import { X } from "lucide-react";
 
 function modeFromHash(): Mode {
   if (window.location.hash === "#recall") return "recall";
@@ -75,22 +88,28 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(
     () => localStorage.getItem(SIDEBAR_STORAGE_KEY) !== "closed",
   );
-  const toggleSidebar = () => setSidebarOpen((open) => !open);
+  const [notesOpen, setNotesOpen] = useState(() => window.innerWidth >= 1024);
+  const [recallBusy, setRecallBusy] = useState(false);
+  const [confirmation, setConfirmation] = useState<{
+    title: string;
+    description: string;
+    label: string;
+    action: () => void;
+  } | null>(null);
   useEffect(
     () => localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarOpen ? "open" : "closed"),
     [sidebarOpen],
   );
 
-  // Ctrl+\ toggles the sidebar anywhere (as in Notion). M switches the
-  // keyboard mode anywhere, except while typing.
+  // M switches keyboard mode when focus is outside app controls.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.repeat) return;
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.code === "Backslash") {
-        e.preventDefault();
-        setSidebarOpen((open) => !open);
+      if (
+        e.target instanceof HTMLElement &&
+        e.target.closest("button, a, [role=menu], [role=dialog], [role=alertdialog]")
+      )
         return;
-      }
       if (isTextInput(e.target)) return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       // The printed letter, falling back to the physical key on non-Latin layouts.
@@ -207,49 +226,61 @@ export default function App() {
 
   const actions = recallMapId ? (
     <>
-      <button
-        type="button"
-        className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => {
-          if (!confirm("Abandon this recall attempt? Everything you've added will be deleted.")) {
-            return;
-          }
-          setError(null);
-          setRequestedMode("build");
-          abandonRecall({ mapId: recallMapId }).catch((e) =>
-            setError(errorMessage(e, "Couldn't abandon the attempt")),
-          );
-        }}
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={recallBusy}
+        onClick={() =>
+          setConfirmation({
+            title: "Abandon this attempt?",
+            description:
+              "Everything you added in this recall attempt will be deleted. Your reference map is safe.",
+            label: "Abandon attempt",
+            action: () => {
+              setRecallBusy(true);
+              setError(null);
+              setRequestedMode("build");
+              abandonRecall({ mapId: recallMapId })
+                .catch((e) => setError(errorMessage(e, "Couldn't abandon the attempt")))
+                .finally(() => setRecallBusy(false));
+            },
+          })
+        }
       >
         Abandon
-      </button>
-      <button
-        type="button"
-        className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-700"
+      </Button>
+      <Button
+        size="sm"
+        disabled={recallBusy}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
           commitEdits();
-          // Only the tree is compared, so floating nodes are discarded. Read
-          // the local copy, which includes a label that was just committed.
           const nodes = convex
             .watchQuery(api.nodes.list, { mapId: recallMapId })
             .localQueryResult();
           const floating = nodes?.filter((n) => !n.isRoot && !n.parentKey).length ?? 0;
-          const discard =
-            floating === 1
-              ? "Your unconnected node will be discarded."
-              : `Your ${floating} unconnected nodes will be discarded.`;
-          if (floating && !confirm(`${discard} Finish anyway?`)) return;
-          setError(null);
-          setRequestedMode("compare");
-          finishRecall({ mapId: recallMapId }).catch((e) =>
-            setError(`${errorMessage(e, "Couldn't finish the attempt")}. It's still open.`),
-          );
+          const complete = () => {
+            setRecallBusy(true);
+            setError(null);
+            setRequestedMode("compare");
+            finishRecall({ mapId: recallMapId })
+              .catch((e) =>
+                setError(`${errorMessage(e, "Couldn't finish the attempt")}. It's still open.`),
+              )
+              .finally(() => setRecallBusy(false));
+          };
+          if (floating)
+            setConfirmation({
+              title: "Finish with unconnected nodes?",
+              description: `${floating === 1 ? "Your unconnected node" : `Your ${floating} unconnected nodes`} will be discarded. Connect them to the tree to include them in your comparison.`,
+              label: "Finish and compare",
+              action: complete,
+            });
+          else complete();
         }}
       >
-        Finish and compare
-      </button>
+        {recallBusy ? "Saving..." : "Finish and compare"}
+      </Button>
     </>
   ) : null;
 
@@ -259,16 +290,25 @@ export default function App() {
       : undefined;
 
   return (
-    <div className="flex h-full bg-white">
+    <SidebarProvider
+      open={sidebarOpen}
+      onOpenChange={setSidebarOpen}
+      className="h-full min-h-0 overflow-hidden"
+      onKeyDown={(e) => {
+        if (
+          e.target instanceof HTMLElement &&
+          e.target.closest('[role="dialog"], [role="alertdialog"], [role="menu"]')
+        )
+          e.stopPropagation();
+      }}
+    >
       <Sidebar
-        open={sidebarOpen}
-        onToggle={toggleSidebar}
         library={library}
         activeTopicId={workspace?.topic._id}
         onOpenMap={openMap}
         onError={setError}
       />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
         <TopBar
           folder={workspace?.folderName}
           title={workspace?.topic.title}
@@ -282,35 +322,57 @@ export default function App() {
           actions={actions}
           vim={vim}
           onVimToggle={toggleVim}
-          sidebarOpen={sidebarOpen}
-          onSidebarToggle={toggleSidebar}
+          notesOpen={notesOpen}
+          onNotesToggle={() => setNotesOpen((open) => !open)}
         />
-        <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="relative flex min-w-0 flex-1 flex-col bg-neutral-50">
             {main}
             {error && (
               <div
                 role="alert"
                 // Below the editor's own save-error banner, so both stay readable.
-                className="absolute left-1/2 top-14 z-30 flex -translate-x-1/2 items-center gap-3 rounded-md bg-red-700 px-3 py-2 text-sm text-white shadow-lg"
+                className="absolute left-4 right-4 top-14 z-30 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center gap-3 rounded-lg border border-destructive/20 bg-background px-4 py-3 text-sm text-destructive shadow-lg"
               >
                 {error}
-                <button
-                  type="button"
-                  className="font-medium underline"
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Dismiss error"
                   onClick={() => setError(null)}
                 >
-                  Dismiss
-                </button>
+                  <X />
+                </Button>
               </div>
             )}
           </div>
           <NotesPanel
             notes={workspace && (workspace.topic.notes ?? null)}
             hidden={mode === "recall"}
+            open={notesOpen}
+            onOpenChange={setNotesOpen}
           />
         </div>
-      </div>
-    </div>
+      </SidebarInset>
+      <AlertDialog
+        open={!!confirmation}
+        onOpenChange={(open) => {
+          if (!open) setConfirmation(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmation?.title}</AlertDialogTitle>
+            <AlertDialogDescription>{confirmation?.description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => confirmation?.action()}>
+              {confirmation?.label}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </SidebarProvider>
   );
 }

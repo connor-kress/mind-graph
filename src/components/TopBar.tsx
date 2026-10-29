@@ -1,31 +1,47 @@
-import type { ReactNode } from "react";
+import { BookOpen, Brain, Columns2, Keyboard, MoreHorizontal, PencilRuler } from "lucide-react";
 import { commitEdits } from "../editor/commitEdits";
-import { ExpandIcon } from "../sidebar/icons";
 import { AccountMenu } from "./AccountMenu";
-import { Logo } from "./Logo";
+import { Badge } from "./ui/badge";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "./ui/breadcrumb";
+import { Button } from "./ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import { Separator } from "./ui/separator";
+import { SidebarTrigger, useSidebar } from "./ui/sidebar";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import type { ReactNode } from "react";
 
 export type Mode = "build" | "recall" | "compare";
-
-const MODES: { id: Mode; label: string }[] = [
-  { id: "build", label: "Build" },
-  { id: "recall", label: "Recall" },
-  { id: "compare", label: "Compare" },
-];
-
+const MODES = [
+  { id: "build", label: "Build", icon: PencilRuler },
+  { id: "recall", label: "Recall", icon: Brain },
+  { id: "compare", label: "Compare", icon: Columns2 },
+] as const;
 type Props = {
   folder?: string | null;
   title?: string;
   mode: Mode;
   onModeChange: (mode: Mode) => void;
-  /** Modes that can't be opened right now, with the reason why. */
   disabled: Partial<Record<Mode, string>>;
   status?: ReactNode;
   actions?: ReactNode;
   vim: boolean;
   onVimToggle: () => void;
-  /** While the sidebar is collapsed, the bar shows its expand button and the logo. */
-  sidebarOpen: boolean;
-  onSidebarToggle: () => void;
+  notesOpen: boolean;
+  onNotesToggle: () => void;
 };
 
 export function TopBar({
@@ -38,91 +54,126 @@ export function TopBar({
   actions,
   vim,
   onVimToggle,
-  sidebarOpen,
-  onSidebarToggle,
+  notesOpen,
+  onNotesToggle,
 }: Props) {
+  const { open, isMobile } = useSidebar();
   return (
-    <header className="flex h-13 shrink-0 items-center gap-3 border-b border-neutral-200 px-4">
-      {!sidebarOpen && (
-        <>
-          <button
-            type="button"
-            title="Expand sidebar (Ctrl+\)"
-            aria-label="Expand sidebar"
-            onClick={onSidebarToggle}
-            onMouseDown={(e) => e.preventDefault()}
-            className="-ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-100"
+    <header className="shrink-0 border-b bg-background">
+      <div className="flex h-14 min-w-0 items-center gap-3 px-3 md:px-5">
+        <SidebarTrigger title="Toggle sidebar (Ctrl+\\)" />
+        <Separator orientation="vertical" className="h-4!" />
+        <Breadcrumb className="min-w-0 flex-1">
+          <BreadcrumbList className="flex-nowrap text-xs">
+            <BreadcrumbItem className="hidden sm:block">My library</BreadcrumbItem>
+            <BreadcrumbSeparator className="hidden sm:block" />
+            {folder && (
+              <>
+                <BreadcrumbItem className="hidden min-w-0 truncate lg:block">
+                  {folder}
+                </BreadcrumbItem>
+                <BreadcrumbSeparator className="hidden lg:block" />
+              </>
+            )}
+            <BreadcrumbItem className="min-w-0">
+              <BreadcrumbPage className="truncate font-medium">
+                {title || "Loading map..."}
+              </BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={notesOpen ? "secondary" : "ghost"}
+              size="icon-sm"
+              aria-label={notesOpen ? "Hide source notes" : "Show source notes"}
+              aria-pressed={notesOpen}
+              onClick={onNotesToggle}
+            >
+              <BookOpen />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Source notes</TooltipContent>
+        </Tooltip>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon-sm" aria-label="Workspace options">
+              <MoreHorizontal />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="w-64 whitespace-nowrap"
+            onKeyDown={(e) => e.stopPropagation()}
           >
-            <ExpandIcon />
-          </button>
-          <Logo />
-          <span className="h-5 w-px shrink-0 bg-neutral-200" aria-hidden />
-        </>
-      )}
-      {title && (
-        <nav
-          aria-label="Breadcrumb"
-          className="flex min-w-0 items-center gap-2 text-[13px] text-neutral-500"
+            <DropdownMenuLabel>Workspace</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuCheckboxItem checked={vim} onCheckedChange={onVimToggle}>
+              <Keyboard />
+              <span className="flex-1">Vim keyboard mode</span>
+              <kbd className="ml-3 text-xs text-muted-foreground">M</kbd>
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={notesOpen} onCheckedChange={onNotesToggle}>
+              <BookOpen />
+              Source notes
+            </DropdownMenuCheckboxItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {(!open || isMobile) && <AccountMenu compact />}
+      </div>
+      <div className="flex min-h-12 flex-wrap items-center justify-between gap-2 border-t border-border/60 px-3 py-2 md:px-5">
+        <ToggleGroup
+          type="single"
+          value={mode}
+          onValueChange={(value) => {
+            if (value && !disabled[value as Mode]) {
+              commitEdits();
+              onModeChange(value as Mode);
+            }
+          }}
+          variant="outline"
+          size="sm"
+          aria-label="Map mode"
         >
-          <span className="shrink-0">Library</span>
-          <span aria-hidden>/</span>
-          {folder && (
-            <>
-              <span className="truncate">{folder}</span>
-              <span aria-hidden>/</span>
-            </>
+          {MODES.map(({ id, label, icon: Icon }) => (
+            <Tooltip key={id}>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <ToggleGroupItem
+                    value={id}
+                    aria-label={label}
+                    aria-disabled={!!disabled[id]}
+                    onClick={(e) => {
+                      if (disabled[id]) e.preventDefault();
+                    }}
+                    onMouseDown={(e) => e.preventDefault()}
+                    className={disabled[id] ? "cursor-not-allowed opacity-40" : ""}
+                  >
+                    <Icon className="size-3.5" />
+                    {label}
+                  </ToggleGroupItem>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {disabled[id] ||
+                  {
+                    build: "Build your reference map",
+                    recall: "Practice from memory",
+                    compare: "Review your recall",
+                  }[id]}
+              </TooltipContent>
+            </Tooltip>
+          ))}
+        </ToggleGroup>
+        <div className="flex flex-wrap items-center gap-2">
+          {status && (
+            <Badge variant="secondary" className="font-normal">
+              {status}
+            </Badge>
           )}
-          <span aria-current="page" className="truncate font-semibold text-neutral-900">
-            {title}
-          </span>
-        </nav>
-      )}
-      <div className="ml-auto flex shrink-0 items-center gap-3">
-        {status && <span className="text-sm font-medium text-neutral-800">{status}</span>}
-        <div className="flex overflow-hidden rounded-md border border-neutral-300 text-sm">
-          {MODES.map(({ id, label }) => {
-            const active = id === mode;
-            const reason = disabled[id];
-            return (
-              <button
-                key={id}
-                type="button"
-                // aria-disabled rather than disabled, so the reason's tooltip shows.
-                aria-disabled={!!reason}
-                aria-pressed={active}
-                title={reason}
-                onClick={() => {
-                  if (reason || active) return;
-                  commitEdits();
-                  onModeChange(id);
-                }}
-                // Keep focus on the canvas so its shortcuts keep working.
-                onMouseDown={(e) => e.preventDefault()}
-                className={`border-l border-neutral-300 px-4 py-1.5 first:border-l-0 ${
-                  active
-                    ? "bg-neutral-900 font-medium text-white"
-                    : reason
-                      ? "cursor-not-allowed text-neutral-400"
-                      : "text-neutral-800 hover:bg-neutral-100"
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
+          {actions}
         </div>
-        {actions}
-        {!sidebarOpen && <AccountMenu compact />}
-        <button
-          type="button"
-          title="Switch keyboard mode (m)"
-          onClick={onVimToggle}
-          // Keep focus on the canvas so its shortcuts keep working.
-          onMouseDown={(e) => e.preventDefault()}
-          className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
-        >
-          {vim ? "Vim mode" : "Normal mode"}
-        </button>
       </div>
     </header>
   );

@@ -1,240 +1,288 @@
-import { useClerk } from "@clerk/react";
 import { useMutation } from "convex/react";
-import { useState, type ReactNode } from "react";
+import { FolderPlus, Plus, Search, ShieldCheck } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { AccountMenu } from "../components/AccountMenu";
 import { Logo } from "../components/Logo";
+import { Button } from "../components/ui/button";
 import {
-  ChevronIcon,
-  ClockIcon,
-  CollapseIcon,
-  GroupIcon,
-  MapIcon,
-  PlusIcon,
-  RecallIcon,
-  SearchIcon,
-  SettingsIcon,
-  TrashIcon,
-} from "./icons";
-import { LibraryTree, type Library } from "./LibraryTree";
-import { COMING_SOON, mockDueCount, mockSharedGroups } from "./mockData";
-import { RowAction, SidebarRow } from "./SidebarRow";
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "../components/ui/command";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Input } from "../components/ui/input";
+import {
+  Sidebar as SidebarShell,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupAction,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenuSkeleton,
+  SidebarSeparator,
+  SidebarTrigger,
+  useSidebar,
+} from "../components/ui/sidebar";
+import { LibraryTree, type Library, type RenameTarget } from "./LibraryTree";
 import { useCollapsedFolders } from "./useCollapsedFolders";
 
-const NEW_FOLDER_NAME = "Untitled folder";
-
 type Props = {
-  open: boolean;
-  onToggle: () => void;
   library?: Library;
   activeTopicId?: Id<"topics">;
-  onOpenMap: (topicId: Id<"topics">) => void;
+  onOpenMap: (id: Id<"topics">) => void;
   onError: (message: string) => void;
 };
 
-/** The collapsible navigation sidebar: library, shared maps, and account. */
-export function Sidebar({ open, onToggle, library, activeTopicId, onOpenMap, onError }: Props) {
-  const { openUserProfile } = useClerk();
+export function Sidebar({ library, activeTopicId, onOpenMap, onError }: Props) {
   const { collapsed, setOpen } = useCollapsedFolders();
-  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const { setOpenMobile } = useSidebar();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [renaming, setRenaming] = useState<RenameTarget | null>(null);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const working = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const createFolder = useMutation(api.library.createFolder);
   const createMap = useMutation(api.library.createMap);
-  // Renames show in the library right away.
-  const renameFolder = useMutation(api.library.renameFolder).withOptimisticUpdate(
-    (store, { folderId, name }) => {
-      const current = store.getQuery(api.library.list, {});
-      if (!current) return;
-      store.setQuery(
-        api.library.list,
-        {},
-        current.map((f) => (f._id === folderId ? { ...f, name } : f)),
-      );
-    },
-  );
-  const renameMap = useMutation(api.library.renameMap).withOptimisticUpdate(
-    (store, { topicId, title }) => {
-      const current = store.getQuery(api.library.list, {});
-      if (!current) return;
-      store.setQuery(
-        api.library.list,
-        {},
-        current.map((f) => ({
-          ...f,
-          maps: f.maps.map((m) => (m._id === topicId ? { ...m, title } : m)),
-        })),
-      );
-    },
-  );
+  const renameFolder = useMutation(api.library.renameFolder);
+  const renameMap = useMutation(api.library.renameMap);
 
-  /** Creates a map in a folder, opens it, and starts naming it. */
-  const newMap = async (folderId?: Id<"folders">) => {
-    try {
-      folderId ??= await createFolder({ name: NEW_FOLDER_NAME });
-      const topicId = await createMap({ folderId });
-      setOpen(folderId, true);
-      onOpenMap(topicId);
-      setRenamingId(topicId);
-    } catch {
-      onError("Couldn't create the map");
-    }
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k" && !e.repeat) {
+        e.preventDefault();
+        setSearchOpen((value) => !value);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  const openMap = (id: Id<"topics">) => {
+    onOpenMap(id);
+    setOpenMobile(false);
+    setSearchOpen(false);
   };
-
+  const startRename = (target: RenameTarget) => {
+    setName(target.name);
+    setRenameError(null);
+    setRenaming(target);
+  };
   const newFolder = async () => {
+    if (working.current) return;
+    working.current = true;
+    setBusy(true);
     try {
-      setRenamingId(await createFolder({ name: NEW_FOLDER_NAME }));
+      const id = await createFolder({ name: "Untitled folder" });
+      setOpen(id, true);
+      startRename({ kind: "folder", id, name: "Untitled folder" });
     } catch {
       onError("Couldn't create the folder");
+    } finally {
+      working.current = false;
+      setBusy(false);
     }
   };
-
-  // New maps go in the open map's folder, or the first one.
+  const newMap = async (folderId?: Id<"folders">) => {
+    if (working.current) return;
+    working.current = true;
+    setBusy(true);
+    try {
+      folderId ??= await createFolder({ name: "Untitled folder" });
+      const id = await createMap({ folderId });
+      setOpen(folderId, true);
+      openMap(id);
+      startRename({ kind: "map", id, name: "Untitled map" });
+    } catch {
+      onError("Couldn't create the map");
+    } finally {
+      working.current = false;
+      setBusy(false);
+    }
+  };
   const currentFolderId =
-    library?.find((f) => f.maps.some((m) => m._id === activeTopicId))?._id ?? library?.[0]?._id;
+    library?.find((folder) => folder.maps.some((map) => map._id === activeTopicId))?._id ??
+    library?.[0]?._id;
 
   return (
-    <aside
-      aria-label="Sidebar"
-      // Collapsed, it keeps its contents but can't be reached by keyboard.
-      inert={!open}
-      className={`shrink-0 overflow-hidden border-neutral-200 bg-sidebar transition-[width] duration-200 ${
-        open ? "w-66 border-r" : "w-0"
-      }`}
-    >
-      <div className="flex h-full w-66 flex-col">
-        <div className="flex h-14 shrink-0 items-center gap-2 px-4">
-          <Logo />
-          <span className="text-[15px] font-bold tracking-[-0.01em]">Mind Graph</span>
-          <button
-            type="button"
-            title="Collapse sidebar (Ctrl+\)"
-            aria-label="Collapse sidebar"
-            onClick={onToggle}
-            onMouseDown={(e) => e.preventDefault()}
-            className="ml-auto flex size-6 items-center justify-center rounded-md text-neutral-500 hover:bg-sidebar-hover"
-          >
-            <CollapseIcon />
-          </button>
-        </div>
-
-        <button
-          type="button"
-          title={COMING_SOON}
-          onMouseDown={(e) => e.preventDefault()}
-          className="mx-2 flex h-8 shrink-0 items-center gap-2 rounded-lg border border-neutral-200 bg-white px-2 text-[13px] text-neutral-400"
-        >
-          <SearchIcon className="size-3.5" />
-          Search maps
-          <span className="kbd ml-auto border-neutral-200 bg-white px-1.5">Ctrl K</span>
-        </button>
-
-        <button
-          type="button"
-          disabled={!library}
-          onClick={() => newMap(currentFolderId)}
-          onMouseDown={(e) => e.preventDefault()}
-          className="mx-2 mt-2 flex h-8.5 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-accent text-sm font-semibold text-white hover:bg-accent/90"
-        >
-          <PlusIcon />
-          New map
-        </button>
-
-        <div className="mt-4 space-y-0.5">
-          <SidebarRow icon={<ClockIcon />} label="Recent" title={COMING_SOON} />
-          <SidebarRow
-            icon={<RecallIcon />}
-            label="Due for recall"
-            title={COMING_SOON}
-            trailing={
-              <span className="flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-due-soft px-1.5 text-[11px] font-semibold text-due">
-                {mockDueCount}
-              </span>
-            }
-          />
-        </div>
-
-        <nav aria-label="Maps" className="mt-5 min-h-0 flex-1 overflow-y-auto pb-4">
-          <SectionHeading
-            action={
-              <RowAction label="New folder" visible onClick={newFolder}>
-                <PlusIcon className="size-3.5" />
-              </RowAction>
-            }
-          >
-            Library
-          </SectionHeading>
-          {library && (
-            <LibraryTree
-              library={library}
-              activeTopicId={activeTopicId}
-              onOpenMap={onOpenMap}
-              collapsed={collapsed}
-              onFolderOpenChange={setOpen}
-              onNewMap={newMap}
-              renamingId={renamingId}
-              onRenamingChange={setRenamingId}
-              onRenameFolder={(folderId, name) =>
-                renameFolder({ folderId, name }).catch(() => onError("Couldn't rename the folder"))
-              }
-              onRenameMap={(topicId, title) =>
-                renameMap({ topicId, title }).catch(() => onError("Couldn't rename the map"))
-              }
-            />
-          )}
-          <div className="mt-0.5">
-            <SidebarRow muted icon={<PlusIcon />} label="New folder" onClick={newFolder} />
+    <>
+      <SidebarShell collapsible="offcanvas" aria-label="Main navigation">
+        <SidebarHeader className="gap-4 p-4">
+          <div className="flex h-8 items-center gap-2.5">
+            <div className="flex size-8 items-center justify-center rounded-lg border bg-background shadow-xs">
+              <Logo className="size-5" />
+            </div>
+            <span className="flex-1 text-sm font-semibold tracking-tight">Mind Graph</span>
+            <SidebarTrigger title="Toggle sidebar (Ctrl+\\)" />
           </div>
-
-          <SectionHeading className="mt-5">Shared</SectionHeading>
-          <ul className="space-y-0.5">
-            {mockSharedGroups.map((group) => (
-              <li key={group.name} className="space-y-0.5">
-                <SidebarRow
-                  leading={
-                    <span className="flex w-3.5 justify-center text-neutral-500">
-                      <ChevronIcon open />
-                    </span>
-                  }
-                  icon={<GroupIcon />}
-                  label={group.name}
-                  title={COMING_SOON}
-                  trailing={<span className="text-xs text-neutral-400">{group.members}</span>}
-                />
-                {group.maps.map((map) => (
-                  <SidebarRow key={map} nested icon={<MapIcon />} label={map} title={COMING_SOON} />
-                ))}
-              </li>
-            ))}
-          </ul>
-        </nav>
-
-        <div className="shrink-0 space-y-0.5 pb-2">
-          <SidebarRow icon={<TrashIcon />} label="Trash" title={COMING_SOON} />
-          <SidebarRow
-            icon={<SettingsIcon />}
-            label="Account settings"
-            onClick={() => openUserProfile()}
-          />
-        </div>
-        <AccountMenu />
-      </div>
-    </aside>
-  );
-}
-
-function SectionHeading({
-  children,
-  action,
-  className = "",
-}: {
-  children: ReactNode;
-  action?: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={`mb-1 flex h-7 items-center px-4 ${className}`}>
-      <h2 className="text-xs font-semibold text-neutral-500">{children}</h2>
-      {action && <div className="ml-auto">{action}</div>}
-    </div>
+          <Button
+            variant="outline"
+            className="w-full justify-start bg-background text-muted-foreground shadow-none"
+            onClick={() => setSearchOpen(true)}
+          >
+            <Search />
+            Search maps<kbd className="ml-auto text-xs">⌘ / Ctrl K</kbd>
+          </Button>
+          <Button
+            className="w-full justify-start"
+            disabled={!library || busy}
+            onClick={() => void newMap(currentFolderId)}
+          >
+            <Plus />
+            New map
+          </Button>
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel>My library</SidebarGroupLabel>
+            <SidebarGroupAction
+              title="New folder"
+              aria-label="New folder"
+              disabled={!library || busy}
+              onClick={() => void newFolder()}
+            >
+              <FolderPlus />
+            </SidebarGroupAction>
+            {library ? (
+              <LibraryTree
+                library={library}
+                activeTopicId={activeTopicId}
+                collapsed={collapsed}
+                onFolderOpenChange={setOpen}
+                onOpenMap={openMap}
+                onNewMap={(id) => void newMap(id)}
+                onRename={startRename}
+                busy={busy}
+              />
+            ) : (
+              <>
+                <SidebarMenuSkeleton showIcon />
+                <SidebarMenuSkeleton showIcon />
+                <SidebarMenuSkeleton showIcon />
+              </>
+            )}
+            {library?.length === 0 && (
+              <p className="px-2 py-4 text-xs text-muted-foreground">Your maps will appear here.</p>
+            )}
+          </SidebarGroup>
+        </SidebarContent>
+        <SidebarFooter className="p-3">
+          <div className="flex items-center gap-2 px-2 pb-2 text-xs text-muted-foreground">
+            <ShieldCheck className="size-3.5" />
+            Your library is private
+          </div>
+          <SidebarSeparator className="mx-0 w-full" />
+          <AccountMenu />
+        </SidebarFooter>
+      </SidebarShell>
+      <CommandDialog
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        title="Search maps"
+        description="Find a map in your library."
+      >
+        <CommandInput placeholder="Search your maps..." aria-label="Search maps" />
+        <CommandList>
+          <CommandEmpty>No maps found.</CommandEmpty>
+          {library?.map((folder) => (
+            <CommandGroup heading={folder.name} key={folder._id}>
+              {folder.maps.map((map) => (
+                <CommandItem
+                  key={map._id}
+                  value={`${folder.name} ${map.title} ${map._id}`}
+                  onSelect={() => openMap(map._id)}
+                >
+                  <Search className="text-muted-foreground" />
+                  <span>{map.title}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ))}
+        </CommandList>
+      </CommandDialog>
+      <Dialog
+        open={!!renaming}
+        onOpenChange={(open) => {
+          if (!open && !saving) setRenaming(null);
+        }}
+      >
+        <DialogContent
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            requestAnimationFrame(() => document.getElementById("library-name")?.focus());
+          }}
+        >
+          <form
+            className="space-y-5"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!renaming || saving || !name.trim()) return;
+              setSaving(true);
+              setRenameError(null);
+              try {
+                if (renaming.kind === "folder")
+                  await renameFolder({ folderId: renaming.id, name: name.trim() });
+                else await renameMap({ topicId: renaming.id, title: name.trim() });
+                setRenaming(null);
+              } catch {
+                setRenameError("Couldn't save the name. Please try again.");
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Rename {renaming?.kind === "folder" ? "folder" : "map"}</DialogTitle>
+              <DialogDescription>Choose a name you can find again later.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <label htmlFor="library-name" className="text-sm font-medium">
+                Name
+              </label>
+              <Input
+                id="library-name"
+                maxLength={200}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                disabled={saving}
+              />
+              {renameError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {renameError}
+                </p>
+              )}
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving}
+                onClick={() => setRenaming(null)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving || !name.trim()}>
+                {saving ? "Saving..." : "Save name"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

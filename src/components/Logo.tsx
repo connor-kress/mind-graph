@@ -5,15 +5,15 @@ export function Logo({ className = "size-5.5" }: { className?: string }) {
       <path
         d="M40 170 L40 40 L110 120 L180 40 L180 170"
         fill="none"
-        stroke="var(--color-accent)"
+        stroke="var(--color-primary)"
         strokeWidth="18"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <circle cx="40" cy="170" r="24" fill="var(--color-accent)" />
-      <circle cx="40" cy="40" r="24" fill="var(--color-accent)" />
-      <circle cx="180" cy="40" r="24" fill="var(--color-accent)" />
-      <circle cx="180" cy="170" r="24" fill="var(--color-accent)" />
+      <circle cx="40" cy="170" r="24" fill="var(--color-primary)" />
+      <circle cx="40" cy="40" r="24" fill="var(--color-primary)" />
+      <circle cx="180" cy="40" r="24" fill="var(--color-primary)" />
+      <circle cx="180" cy="170" r="24" fill="var(--color-primary)" />
       <circle cx="110" cy="120" r="28" fill="#b35a00" />
     </svg>
   );
