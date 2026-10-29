@@ -10,6 +10,8 @@
 
 import type * as auth from "../auth.js";
 import type * as extract from "../extract.js";
+import type * as extractPdf from "../extractPdf.js";
+import type * as extractSlides from "../extractSlides.js";
 import type * as library from "../library.js";
 import type * as links from "../links.js";
 import type * as migrations from "../migrations.js";
@@ -28,6 +30,8 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   extract: typeof extract;
+  extractPdf: typeof extractPdf;
+  extractSlides: typeof extractSlides;
   library: typeof library;
   links: typeof links;
   migrations: typeof migrations;

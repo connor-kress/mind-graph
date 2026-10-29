@@ -1,8 +1,9 @@
 import { convexTest } from "convex-test";
+import { strToU8, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
-import { MAX_SOURCE_BYTES, type Block } from "../convex/model";
+import { EXTRACTOR_VERSION, MAX_SOURCE_BYTES, type Block } from "../convex/model";
 import schema from "../convex/schema";
 
 const modules = import.meta.glob("../convex/**/*.ts");
@@ -27,7 +28,13 @@ type T = Awaited<ReturnType<typeof fixture>>["t"];
 type User = Awaited<ReturnType<typeof fixture>>["alice"];
 
 /** Uploads a file the way the client does, then runs extraction. */
-async function upload(t: T, user: User, topicId: Id<"topics">, name: string, data: string) {
+async function upload(
+  t: T,
+  user: User,
+  topicId: Id<"topics">,
+  name: string,
+  data: string | Uint8Array<ArrayBuffer>,
+) {
   const storageId = await t.run((ctx) => ctx.storage.store(new Blob([data])));
   const result = await user.mutation(api.sources.add, { topicId, storageId, name });
   await t.finishAllScheduledFunctions(vi.runAllTimers);
@@ -43,6 +50,87 @@ function blocksOf(t: T, sourceId: Id<"sources">) {
     const source = await ctx.db.get(sourceId);
     const blob = source?.contentId && (await ctx.storage.get(source.contentId));
     return blob ? (JSON.parse(await blob.text()) as Block[]) : null;
+  });
+}
+
+/** A PDF with Helvetica (F1) and Helvetica Bold (F2), one content stream per page. */
+function pdf(pages: string[][]) {
+  const font = (name: string) =>
+    `<< /Type /Font /Subtype /Type1 /BaseFont /${name} /Encoding /WinAnsiEncoding >>`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Pages /Kids [${pages.map((_, i) => `${5 + 2 * i} 0 R`).join(" ")}] /Count ${pages.length} >>`,
+    font("Helvetica"),
+    font("Helvetica-Bold"),
+  ];
+  for (const [i, lines] of pages.entries()) {
+    const stream = lines.join("\n");
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${6 + 2 * i} 0 R >>`,
+      `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    );
+  }
+  let out = "%PDF-1.4\n";
+  const offsets = objects.map((object, i) => {
+    const offset = out.length;
+    out += `${i + 1} 0 obj\n${object}\nendobj\n`;
+    return offset;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  out += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  return strToU8(out);
+}
+
+const NS = `xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"`;
+
+/** A text shape; `ph` is its placeholder element, if any. */
+function shape(ph: string, paragraphs: string[]) {
+  const body = paragraphs.map((p) => `<a:p>${p}</a:p>`).join("");
+  return `<p:sp><p:nvSpPr><p:cNvPr id="1" name=""/><p:cNvSpPr/><p:nvPr>${ph}</p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/>${body}</p:txBody></p:sp>`;
+}
+
+const run = (text: string) => `<a:r><a:rPr lang="en-US"/><a:t>${text}</a:t></a:r>`;
+
+const slide = (shapes: string) =>
+  `<?xml version="1.0" encoding="UTF-8"?><p:sld ${NS}><p:cSld><p:spTree><p:nvGrpSpPr/><p:grpSpPr/>${shapes}</p:spTree></p:cSld></p:sld>`;
+
+/** A two-slide presentation whose slide files are listed out of order. */
+function pptx() {
+  const cell = (text: string) =>
+    `<a:tc><a:txBody><a:bodyPr/><a:p>${run(text)}</a:p></a:txBody></a:tc>`;
+  const row = (...cells: string[]) => `<a:tr h="1">${cells.map(cell).join("")}</a:tr>`;
+  return zipSync({
+    "ppt/presentation.xml": strToU8(
+      `<p:presentation ${NS}><p:sldIdLst><p:sldId id="256" r:id="rId3"/><p:sldId id="257" r:id="rId2"/></p:sldIdLst></p:presentation>`,
+    ),
+    "ppt/_rels/presentation.xml.rels": strToU8(
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="slide" Target="slides/slide2.xml"/><Relationship Id="rId3" Type="slide" Target="slides/slide1.xml"/></Relationships>`,
+    ),
+    "ppt/slides/slide1.xml": strToU8(
+      slide(
+        shape(`<p:ph type="ctrTitle"/>`, [run("Photosynthesis")]) +
+          shape(`<p:ph type="subTitle" idx="1"/>`, [run("Unit 3 &amp; ") + run("review")]),
+      ),
+    ),
+    "ppt/slides/slide2.xml": strToU8(
+      slide(
+        shape(`<p:ph type="title"/>`, [run("Stages")]) +
+          shape(`<p:ph idx="1"/>`, [
+            run("Light reactions"),
+            `<a:pPr lvl="1"/>${run("Thylakoid")}`,
+            run("Calvin cycle"),
+            `<a:pPr><a:buNone/></a:pPr>${run("Both happen in chloroplasts.")}`,
+            "",
+          ]) +
+          shape("", [run("Remember this")]) +
+          shape(`<p:ph type="sldNum" idx="12"/>`, [
+            `<a:fld id="x" type="slidenum"><a:t>2</a:t></a:fld>`,
+          ]) +
+          `<p:graphicFrame><a:graphic><a:graphicData><a:tbl>${row("Stage", "Where")}${row("Light", "Thylakoid")}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`,
+      ),
+    ),
   });
 }
 
@@ -82,22 +170,95 @@ describe("source notes", () => {
     expect(opened?.contentUrl).toBeTruthy();
   });
 
-  test("kinds without an extractor are ready to open, and unreadable files fail", async () => {
+  test("PowerPoint slides are read in order, with titles as headings", async () => {
     const { t, alice, topicId } = await fixture();
-    const pdf = await upload(t, alice, topicId, "Slides.pdf", "%PDF-1.7");
+    const { result } = await upload(t, alice, topicId, "Unit 3.pptx", pptx());
+    const sourceId = result.sourceId!;
+    expect(await blocksOf(t, sourceId)).toEqual([
+      { type: "heading", level: 1, text: "Photosynthesis", page: 1 },
+      { type: "paragraph", text: "Unit 3 & review", page: 1 },
+      { type: "heading", level: 2, text: "Stages", page: 2 },
+      {
+        type: "list",
+        ordered: false,
+        items: [
+          { text: "Light reactions", items: [{ text: "Thylakoid" }] },
+          { text: "Calvin cycle" },
+        ],
+        page: 2,
+      },
+      { type: "paragraph", text: "Both happen in chloroplasts.", page: 2 },
+      { type: "paragraph", text: "Remember this", page: 2 },
+      {
+        type: "table",
+        rows: [
+          ["Stage", "Where"],
+          ["Light", "Thylakoid"],
+        ],
+        page: 2,
+      },
+    ]);
+    expect(await alice.query(api.sources.open, { sourceId })).toMatchObject({ pageCount: 2 });
+  });
+
+  test("PDF text is read into headings by font, paragraphs, and lists", async () => {
+    const { t, alice, topicId } = await fixture();
+    const { result } = await upload(
+      t,
+      alice,
+      topicId,
+      "Cells.pdf",
+      pdf([
+        [
+          "BT /F2 20 Tf 72 720 Td (Cell Biology) Tj ET",
+          "BT /F1 11 Tf 72 690 Td (Cells are the basic unit) Tj 0 -13 Td (of life.) Tj ET",
+          "BT /F1 11 Tf 72 650 Td (A second para-) Tj 0 -13 Td (graph here.) Tj ET",
+          "BT /F2 11 Tf 72 610 Td (Organelles) Tj ET",
+          "BT /F1 11 Tf 72 590 Td (\\225 Nucleus) Tj 0 -14 Td (\\225 Mitochondria, which make) Tj ET",
+          "BT /F1 11 Tf 82 563 Td (energy) Tj ET",
+          "BT /F1 11 Tf 72 549 Td (\\225 Ribosomes) Tj ET",
+          "BT /F1 11 Tf 300 40 Td (1) Tj ET",
+        ],
+        ["BT /F1 11 Tf 72 720 Td (Page two text.) Tj ET"],
+      ]),
+    );
+    const sourceId = result.sourceId!;
+    expect(await blocksOf(t, sourceId)).toEqual([
+      { type: "heading", level: 1, text: "Cell Biology", page: 1 },
+      { type: "paragraph", text: "Cells are the basic unit of life.", page: 1 },
+      { type: "paragraph", text: "A second paragraph here.", page: 1 },
+      { type: "heading", level: 2, text: "Organelles", page: 1 },
+      {
+        type: "list",
+        ordered: false,
+        items: [
+          { text: "Nucleus" },
+          { text: "Mitochondria, which make energy" },
+          { text: "Ribosomes" },
+        ],
+        page: 1,
+      },
+      { type: "paragraph", text: "Page two text.", page: 2 },
+    ]);
+    expect(await alice.query(api.sources.open, { sourceId })).toMatchObject({ pageCount: 2 });
+  });
+
+  test("a PDF without text is read as empty, and unreadable files fail", async () => {
+    const { t, alice, topicId } = await fixture();
+    const scan = await upload(t, alice, topicId, "Scan.pdf", pdf([["0 0 m 100 100 l S"]]));
+    const broken = await upload(t, alice, topicId, "Broken.pdf", "%PDF-1.7");
     const docx = await upload(t, alice, topicId, "Broken.docx", "not a zip");
     expect(await alice.query(api.sources.list, { topicId })).toMatchObject([
-      { _id: pdf.result.sourceId, status: "ready" },
+      { _id: scan.result.sourceId, status: "ready" },
+      { _id: broken.result.sourceId, status: "failed" },
       { _id: docx.result.sourceId, status: "failed" },
     ]);
-    expect(
-      (await alice.query(api.sources.open, { sourceId: pdf.result.sourceId! }))?.contentUrl,
-    ).toBeNull();
+    expect(await blocksOf(t, scan.result.sourceId!)).toEqual([]);
 
     await alice.mutation(api.sources.retry, { sourceId: docx.result.sourceId! });
-    expect((await alice.query(api.sources.list, { topicId }))[1].status).toBe("processing");
+    expect((await alice.query(api.sources.list, { topicId }))[2].status).toBe("processing");
     await t.finishAllScheduledFunctions(vi.runAllTimers);
-    expect((await alice.query(api.sources.list, { topicId }))[1].status).toBe("failed");
+    expect((await alice.query(api.sources.list, { topicId }))[2].status).toBe("failed");
   });
 
   test("unsupported and oversized files are deleted instead of added", async () => {
@@ -166,6 +327,35 @@ describe("source notes", () => {
       expect(job.args[0].name).toMatch(/\.md$/);
       expect(job.args[0].text).toMatch(/^# /);
     }
+  });
+
+  test("sources read by an older extractor are read again", async () => {
+    const { t, topicId } = await fixture();
+    // A presentation added before slides could be read.
+    const sourceId = await t.run(async (ctx) =>
+      ctx.db.insert("sources", {
+        topicId,
+        storageId: await ctx.storage.store(new Blob([pptx()])),
+        name: "Unit 3.pptx",
+        kind: "pptx",
+        size: 1,
+        status: "ready",
+        extractorVersion: 1,
+      }),
+    );
+    await t.mutation(internal.migrations.reextractSources);
+    expect((await t.run((ctx) => ctx.db.get(sourceId)))?.status).toBe("processing");
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(await t.run((ctx) => ctx.db.get(sourceId))).toMatchObject({
+      status: "ready",
+      pageCount: 2,
+      extractorVersion: EXTRACTOR_VERSION,
+    });
+    expect(await blocksOf(t, sourceId)).toHaveLength(7);
+
+    // Already current: nothing to do.
+    await t.mutation(internal.migrations.reextractSources);
+    expect((await t.run((ctx) => ctx.db.get(sourceId)))?.status).toBe("ready");
   });
 
   test("the migration moves inline notes into a source", async () => {

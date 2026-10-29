@@ -42,10 +42,12 @@ export default defineSchema({
     name: v.string(),
     kind: sourceKind,
     size: v.number(),
-    /** Whether its text has been extracted (`ready` even if the kind has no extractor yet). */
+    /** Whether its text has been extracted. */
     status: v.union(v.literal("processing"), v.literal("ready"), v.literal("failed")),
-    /** Extracted blocks as JSON (see `Block`), if the kind has an extractor. */
+    /** Extracted blocks as JSON (see `Block`). */
     contentId: v.optional(v.id("_storage")),
+    /** Pages in a PDF, or slides in a presentation. */
+    pageCount: v.optional(v.number()),
     extractorVersion: v.optional(v.number()),
   }).index("by_topic", ["topicId"]),
 

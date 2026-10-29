@@ -2,5 +2,8 @@
   "$schema": "node_modules/convex/schemas/convex.schema.json",
   "aiFiles": {
     "enabled": false
+  },
+  "node": {
+    "nodeVersion": "24"
   }
 }
