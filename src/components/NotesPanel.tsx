@@ -16,6 +16,16 @@ const ACCEPT = Object.keys(SOURCE_KINDS)
 const hasFiles = (e: { dataTransfer: DataTransfer | null }) =>
   !!e.dataTransfer?.types.includes("Files");
 
+const WIDTH_STORAGE_KEY = "mind-graph:notes-width";
+const DEFAULT_WIDTH = 320;
+const MIN_WIDTH = 256;
+
+/** A width the panel can take in the current window, leaving room for the canvas. */
+function clampWidth(width: number) {
+  const max = Math.max(MIN_WIDTH, Math.min(720, window.innerWidth * 0.6));
+  return Math.round(Math.min(Math.max(width, MIN_WIDTH), max));
+}
+
 type Props = {
   topicId?: Id<"topics">;
   hidden: boolean;
@@ -35,6 +45,16 @@ export function NotesPanel({ topicId, hidden, open, onOpenChange }: Props) {
   // Entering a child element fires dragenter before the parent's dragleave.
   const dragDepth = useRef(0);
   const accepting = open && !hidden;
+  const [width, setWidth] = useState(() =>
+    clampWidth(Number(localStorage.getItem(WIDTH_STORAGE_KEY)) || DEFAULT_WIDTH),
+  );
+  useEffect(() => localStorage.setItem(WIDTH_STORAGE_KEY, String(width)), [width]);
+  useEffect(() => {
+    const onResize = () => setWidth((w) => clampWidth(w));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const resizeFrom = useRef<{ x: number; width: number } | null>(null);
 
   // Another map's file isn't in this one's list.
   const [prevTopicId, setPrevTopicId] = useState(topicId);
@@ -179,9 +199,41 @@ export function NotesPanel({ topicId, hidden, open, onOpenChange }: Props) {
   return (
     <aside
       aria-label="Source notes"
-      className="flex w-72 shrink-0 flex-col border-l bg-background xl:w-80"
+      className="relative flex shrink-0 flex-col border-l bg-background"
+      style={{ width }}
       {...dropZone}
     >
+      {/* Drag the left edge to resize; arrow keys work too, and double-click resets. */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize source notes"
+        aria-valuenow={width}
+        aria-valuemin={MIN_WIDTH}
+        tabIndex={0}
+        title="Drag to resize"
+        className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-[3px] after:w-0.5 after:transition-colors hover:after:bg-primary/40 focus-visible:after:bg-primary"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          resizeFrom.current = { x: e.clientX, width };
+        }}
+        onPointerMove={(e) => {
+          const from = resizeFrom.current;
+          if (from) setWidth(clampWidth(from.width + from.x - e.clientX));
+        }}
+        onPointerUp={() => (resizeFrom.current = null)}
+        onPointerCancel={() => (resizeFrom.current = null)}
+        onDoubleClick={() => setWidth(clampWidth(DEFAULT_WIDTH))}
+        onKeyDown={(e) => {
+          const step = e.shiftKey ? 64 : 16;
+          if (e.key === "ArrowLeft") setWidth((w) => clampWidth(w + step));
+          else if (e.key === "ArrowRight") setWidth((w) => clampWidth(w - step));
+          else return;
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+      />
       <div className="flex h-12 shrink-0 items-center gap-2 border-b px-5 pr-3">
         <BookOpen className="size-4 text-muted-foreground" />
         <h2 className="flex-1 text-xs font-semibold">Source notes</h2>
