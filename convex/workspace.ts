@@ -52,6 +52,12 @@ export const seed = mutation({
   args: {},
   handler: async (ctx) => {
     const ownerId = await requireOwner(ctx);
+    const initialized = await ctx.db
+      .query("libraries")
+      .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+      .first();
+    if (initialized) return;
+    await ctx.db.insert("libraries", { ownerId });
     if (
       await ctx.db
         .query("folders")

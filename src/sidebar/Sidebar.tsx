@@ -36,7 +36,8 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "../components/ui/sidebar";
-import { LibraryTree, type Library, type RenameTarget } from "./LibraryTree";
+import { LibraryTree, type Library, type LibraryTarget } from "./LibraryTree";
+import { DeleteLibraryDialog } from "./DeleteLibraryDialog";
 import { useCollapsedFolders } from "./useCollapsedFolders";
 
 type Props = {
@@ -44,13 +45,15 @@ type Props = {
   activeTopicId?: Id<"topics">;
   onOpenMap: (id: Id<"topics">) => void;
   onError: (message: string) => void;
+  onDelete: (target: LibraryTarget, confirmation: string) => Promise<void>;
 };
 
-export function Sidebar({ library, activeTopicId, onOpenMap, onError }: Props) {
+export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }: Props) {
   const { collapsed, setOpen } = useCollapsedFolders();
   const { setOpenMobile } = useSidebar();
   const [searchOpen, setSearchOpen] = useState(false);
-  const [renaming, setRenaming] = useState<RenameTarget | null>(null);
+  const [renaming, setRenaming] = useState<LibraryTarget | null>(null);
+  const [deleting, setDeleting] = useState<LibraryTarget | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const working = useRef(false);
@@ -77,7 +80,7 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError }: Props) {
     setOpenMobile(false);
     setSearchOpen(false);
   };
-  const startRename = (target: RenameTarget) => {
+  const startRename = (target: LibraryTarget) => {
     setName(target.name);
     setRenameError(null);
     setRenaming(target);
@@ -166,6 +169,7 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError }: Props) {
                 onOpenMap={openMap}
                 onNewMap={(id) => void newMap(id)}
                 onRename={startRename}
+                onDelete={setDeleting}
                 busy={busy}
               />
             ) : (
@@ -189,6 +193,13 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError }: Props) {
           <AccountMenu />
         </SidebarFooter>
       </SidebarShell>
+      {deleting && (
+        <DeleteLibraryDialog
+          target={deleting}
+          onClose={() => setDeleting(null)}
+          onConfirm={(confirmation) => onDelete(deleting, confirmation)}
+        />
+      )}
       <CommandDialog
         open={searchOpen}
         onOpenChange={setSearchOpen}

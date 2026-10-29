@@ -13,6 +13,7 @@ import { TopBar, type Mode } from "./components/TopBar";
 import { isTextInput } from "./editor/isTextInput";
 import { MapEditor } from "./editor/MapEditor";
 import { Sidebar } from "./sidebar/Sidebar";
+import type { LibraryTarget } from "./sidebar/LibraryTree";
 import { Button } from "./components/ui/button";
 import { SidebarProvider, SidebarInset } from "./components/ui/sidebar";
 import {
@@ -68,6 +69,9 @@ export default function App() {
   const workspace = useQuery(api.workspace.get, { topicId });
   const library = useQuery(api.library.list);
   const seed = useMutation(api.workspace.seed);
+  const deleteMap = useMutation(api.library.deleteMap);
+  const deleteFolder = useMutation(api.library.deleteFolder);
+  const [hiddenTopicId, setHiddenTopicId] = useState<Id<"topics"> | null>(null);
   const startRecall = useMutation(api.workspace.startRecall);
   const finish = useMutation(api.workspace.finishRecall);
   const abandon = useMutation(api.workspace.abandonRecall);
@@ -140,8 +144,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (library?.length === 0) seed().catch(console.error);
-  }, [library, seed]);
+    seed().catch(() => setError("Couldn't initialize your library. Please reload to try again."));
+  }, [seed]);
 
   const openMap = (id: Id<"topics">) => {
     if (id === workspace?.topic._id) return;
@@ -151,6 +155,26 @@ export default function App() {
     setRequestedMode("build");
     setSummary(null);
     setError(null);
+  };
+
+  const removeFromLibrary = async (target: LibraryTarget, confirmation: string) => {
+    const removesOpenMap =
+      workspace &&
+      (target.kind === "map"
+        ? target.id === workspace.topic._id
+        : target.id === workspace.topic.folderId);
+    if (removesOpenMap) {
+      commitEdits();
+      // Unsubscribe the editor before its map is deleted.
+      setHiddenTopicId(workspace.topic._id);
+    }
+    try {
+      if (target.kind === "folder") await deleteFolder({ folderId: target.id, confirmation });
+      else await deleteMap({ topicId: target.id });
+    } catch (error) {
+      setHiddenTopicId(null);
+      throw error;
+    }
   };
 
   // An attempt in progress locks Build and Compare, which would reveal the answers.
@@ -184,6 +208,10 @@ export default function App() {
   // Keep the URL in step with what's shown (including forced modes, and the
   // map opened when the URL named none or an unknown one).
   useEffect(() => {
+    if (workspace === null) {
+      history.replaceState(null, "", location.pathname);
+      return;
+    }
     if (!workspace) return;
     const search = `?${MAP_PARAM}=${workspace.topic._id}`;
     const hash = mode === "build" ? "" : `#${mode}`;
@@ -193,7 +221,7 @@ export default function App() {
   }, [mode, workspace]);
 
   let main = null;
-  if (workspace?.referenceMapId) {
+  if (workspace?.referenceMapId && workspace.topic._id !== hiddenTopicId) {
     if (mode === "build") {
       main = (
         <MapEditor key={workspace.referenceMapId} mapId={workspace.referenceMapId} vim={vim} />
@@ -307,6 +335,7 @@ export default function App() {
         activeTopicId={workspace?.topic._id}
         onOpenMap={openMap}
         onError={setError}
+        onDelete={removeFromLibrary}
       />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
         <TopBar
@@ -328,6 +357,16 @@ export default function App() {
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="relative flex min-w-0 flex-1 flex-col bg-neutral-50">
             {main}
+            {workspace === null && (
+              <div className="flex flex-1 items-center justify-center p-6 text-center">
+                <div>
+                  <h1 className="text-lg font-semibold">No maps yet</h1>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Create a map from the library sidebar.
+                  </p>
+                </div>
+              </div>
+            )}
             {error && (
               <div
                 role="alert"

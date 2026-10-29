@@ -3,6 +3,8 @@ import { v } from "convex/values";
 import { linkValidator, mapKind, nodeFields } from "./model";
 
 export default defineSchema({
+  // Remember initialization even after the user deletes their whole library.
+  libraries: defineTable({ ownerId: v.string() }).index("by_owner", ["ownerId"]),
   // A folder in the library, e.g. a course.
   folders: defineTable({
     // Optional so pre-account documents remain intact, but inaccessible.

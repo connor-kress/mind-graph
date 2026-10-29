@@ -1,5 +1,6 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { mutation, query, type MutationCtx } from "./_generated/server";
 import { insertTree } from "./workspace";
 import { requireOwner, requireFolder, requireTopic } from "./auth";
 
@@ -103,3 +104,52 @@ function cleanName(name: string) {
   if (trimmed.length > MAX_NAME_LENGTH) throw new ConvexError("Name is too long");
   return trimmed;
 }
+
+/** Remove the topic, reference map, all recall attempts, and their nodes together. */
+async function deleteTopic(ctx: MutationCtx, topicId: Id<"topics">) {
+  await requireTopic(ctx, topicId);
+  const maps = await ctx.db
+    .query("maps")
+    .withIndex("by_topic_kind", (q) => q.eq("topicId", topicId))
+    .collect();
+  for (const map of maps) {
+    const nodes = await ctx.db
+      .query("nodes")
+      .withIndex("by_map_key", (q) => q.eq("mapId", map._id))
+      .collect();
+    for (const node of nodes) await ctx.db.delete(node._id);
+    await ctx.db.delete(map._id);
+  }
+  await ctx.db.delete(topicId);
+}
+
+export const deleteMap = mutation({
+  args: { topicId: v.id("topics") },
+  handler: async (ctx, { topicId }) => {
+    await deleteTopic(ctx, topicId);
+  },
+});
+
+export const deleteFolder = mutation({
+  args: { folderId: v.id("folders"), confirmation: v.string() },
+  handler: async (ctx, { folderId, confirmation }) => {
+    const folder = await requireFolder(ctx, folderId);
+    if (confirmation !== folder.name)
+      throw new ConvexError("Folder name doesn't match. Check its current name and try again.");
+    const topics = await ctx.db
+      .query("topics")
+      .withIndex("by_folder", (q) => q.eq("folderId", folderId))
+      .collect();
+    for (const topic of topics) await deleteTopic(ctx, topic._id);
+    const ownerId = folder.ownerId!;
+    if (
+      !(await ctx.db
+        .query("libraries")
+        .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+        .first())
+    ) {
+      await ctx.db.insert("libraries", { ownerId });
+    }
+    await ctx.db.delete(folderId);
+  },
+});
