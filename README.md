@@ -2,36 +2,29 @@
 
 Concept mapping with built-in recall practice. Build a reference map with your notes open, rebuild it from memory in Recall mode, then compare the two to see what you missed.
 
-Built with Vite, React, [React Flow](https://reactflow.dev), and [Convex](https://convex.dev).
+Built with Vite, React, [React Flow](https://reactflow.dev), [Convex](https://convex.dev), and [Clerk](https://clerk.com).
 
 ## Development
 
 ```sh
 pnpm install
-pnpm dev:convex   # Convex dev deployment: pushes functions and regenerates types
-pnpm dev          # Vite dev server
+clerk auth login  # Select the Mind Graph workspace
+clerk link        # Select the Mind Graph application
+clerk env pull --instance dev
+pnpm dev:convex   # Configure/sync your Convex dev deployment
+pnpm dev          # Start Vite in another terminal
 ```
 
-The first `pnpm dev:convex` run configures a dev deployment and writes `.env.local`. The app seeds a demo topic on first load.
+See `.env.example` for local configuration. Each signed-in account gets a private demo library. The account menu provides profile settings and sign-out.
 
-## Account components
-
-Standalone Clerk components are available for the upcoming sidebar integration. They are not mounted in the app yet and do not change Convex authentication or map access.
-
-- `AccountProvider` supplies Clerk context. Set `VITE_CLERK_PUBLISHABLE_KEY` in `.env.local` before mounting it.
-- `AccountGate` shows Clerk's sign-in screen with a sign-up link, then renders its children once signed in.
-- `AccountButtons` opens sign-in or sign-up in a modal.
-- `AccountMenu` displays the current user and Clerk's menu for profile, account security, sessions, and sign-out. Its `compact` option shows only the avatar.
-
-The Mind Graph Clerk application is in the dedicated Mind Graph workspace. Authorize the CLI for that workspace, then link the application and fetch development keys:
+Authentication uses email/password, with Google and mandatory email verification disabled. Convex verifies Clerk tokens and checks ownership on all map operations. Data created before accounts existed stays stored but unclaimed.
 
 ```sh
-clerk auth login
-clerk link --app app_3LNFscjNO00bK4AxmaH94B0UhAj
-clerk env pull --instance dev
+pnpm test
+pnpm build
+pnpm lint
+pnpm exec tsc -p convex/tsconfig.json --noEmit
 ```
-
-The browser only needs the publishable key. Never expose `CLERK_SECRET_KEY` through a `VITE_` variable. See `.env.example` for the local environment shape. The UI components do not enforce backend access. Convex authentication and ownership checks will be added separately on `feat/sidebar`.
 
 ## Editing the map
 
@@ -48,6 +41,13 @@ The browser only needs the publishable key. Never expose `CLERK_SECRET_KEY` thro
 | Delete            | `Del` (`Shift`+`Del` with children, `Alt`+`Del` leaves children floating), or right-click                                          |
 | Undo / redo       | `Ctrl`+`Z` / `Ctrl`+`Shift`+`Z`                                                                                                    |
 
-## Deploying to Vercel
+## Deployment
 
-`vercel.json` runs `convex deploy` before building, which pushes the Convex functions to production and points the build at the production deployment. In the Vercel project settings, set `CONVEX_DEPLOY_KEY` to a production deploy key from the Convex dashboard.
+Vercel builds deploy the Convex backend and inject its URL into the frontend. Configure these variables separately for each Vercel environment:
+
+- **Preview:** Clerk development publishable key and a Convex project preview deploy key. Each branch gets a separate Convex backend; previews share Clerk development accounts.
+- **Production:** Clerk production publishable key and the Convex production deploy key.
+
+The variables are `VITE_CLERK_PUBLISHABLE_KEY` and `CONVEX_DEPLOY_KEY`. On Convex, `CLERK_JWT_ISSUER_DOMAIN` must match the selected Clerk instance, which needs a JWT template named `convex` with `{"aud":"convex"}`. New dev and preview deployments inherit the issuer from project defaults. Environment variable changes require a new Vercel deployment.
+
+Manage keys, domains, and DNS records in the [Clerk dashboard](https://dashboard.clerk.com), [Convex dashboard](https://dashboard.convex.dev), and [Vercel dashboard](https://vercel.com/dashboard). See [Convex's Vercel guide](https://docs.convex.dev/production/hosting/vercel) and [Clerk's production guide](https://clerk.com/docs/guides/development/deployment/production) for setup details.

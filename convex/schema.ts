@@ -5,13 +5,16 @@ import { linkValidator, mapKind, nodeFields } from "./model";
 export default defineSchema({
   // A folder in the library, e.g. a course.
   folders: defineTable({
+    // Optional so pre-account documents remain intact, but inaccessible.
+    ownerId: v.optional(v.string()),
     name: v.string(),
     order: v.number(),
-  }),
+  }).index("by_owner", ["ownerId"]),
 
   // A study topic (shown as a map in the library): its source notes, one
   // reference map, and recall attempts.
   topics: defineTable({
+    ownerId: v.optional(v.string()),
     folderId: v.optional(v.id("folders")),
     /** @deprecated Replaced by the folder's name; kept for older documents. */
     course: v.optional(v.string()),
@@ -22,7 +25,9 @@ export default defineSchema({
         paragraphs: v.array(v.string()),
       }),
     ),
-  }).index("by_folder", ["folderId"]),
+  })
+    .index("by_folder", ["folderId"])
+    .index("by_owner", ["ownerId"]),
 
   maps: defineTable({
     topicId: v.id("topics"),

@@ -3,13 +3,15 @@ import { mutation, query, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { linkValidator, type ManualLink } from "./model";
 
+import { requireMap } from "./auth";
+
 const MAX_LINKS = 2000;
 
 /** A finished attempt's manual links. */
 export const list = query({
   args: { mapId: v.id("maps") },
   handler: async (ctx, { mapId }): Promise<ManualLink[]> => {
-    const map = await ctx.db.get(mapId);
+    const map = await requireMap(ctx, mapId);
     return map?.links ?? [];
   },
 });
@@ -23,7 +25,7 @@ export const set = mutation({
   args: { mapId: v.id("maps"), links: v.array(linkValidator) },
   handler: async (ctx, { mapId, links }) => {
     if (links.length > MAX_LINKS) throw new ConvexError("Too many links");
-    const map = await ctx.db.get(mapId);
+    const map = await requireMap(ctx, mapId);
     if (!map || map.kind !== "recall") throw new ConvexError("Recall attempt not found");
     if (!map.finishedAt) throw new ConvexError("Finish the attempt before linking nodes");
     const reference = await ctx.db

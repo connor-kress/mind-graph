@@ -2,6 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { demoLibrary, type SeedNode } from "./seedData";
+import { requireOwner, requireTopic, requireMap } from "./auth";
 
 /**
  * A topic with its maps: the one asked for, or the first one if it's missing
@@ -10,9 +11,16 @@ import { demoLibrary, type SeedNode } from "./seedData";
 export const get = query({
   args: { topicId: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    const ownerId = await requireOwner(ctx);
     const topicId = args.topicId && ctx.db.normalizeId("topics", args.topicId);
+    const requested = topicId ? await ctx.db.get(topicId) : null;
     const topic =
-      (topicId && (await ctx.db.get(topicId))) || (await ctx.db.query("topics").first());
+      requested?.ownerId === ownerId
+        ? requested
+        : await ctx.db
+            .query("topics")
+            .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+            .first();
     if (!topic) return null;
     const folder = topic.folderId && (await ctx.db.get(topic.folderId));
     const reference = await ctx.db
@@ -39,37 +47,33 @@ export const get = query({
   },
 });
 
-/**
- * Creates the demo library if there are no folders yet. Topics from before
- * folders existed move into the folder named after their course, and demo
- * maps they already cover aren't created again.
- */
+/** Creates a private demo library once for each account. Legacy data stays unclaimed. */
 export const seed = mutation({
   args: {},
   handler: async (ctx) => {
-    if (await ctx.db.query("folders").first()) return;
+    const ownerId = await requireOwner(ctx);
+    if (
+      await ctx.db
+        .query("folders")
+        .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+        .first()
+    )
+      return;
     const folderIds = new Map<string, Id<"folders">>();
     const folderFor = async (name: string) => {
       let folderId = folderIds.get(name);
       if (!folderId) {
-        folderId = await ctx.db.insert("folders", { name, order: folderIds.size });
+        folderId = await ctx.db.insert("folders", { ownerId, name, order: folderIds.size });
         folderIds.set(name, folderId);
       }
       return folderId;
     };
     for (const folder of demoLibrary) await folderFor(folder.name);
 
-    const existing = await ctx.db.query("topics").collect();
-    for (const topic of existing) {
-      const folderId = await folderFor(topic.course ?? "Unsorted");
-      await ctx.db.patch(topic._id, { folderId, course: undefined });
-    }
-
     for (const folder of demoLibrary) {
       for (const map of folder.maps) {
-        const exists = existing.some((t) => t.course === folder.name && t.title === map.title);
-        if (exists) continue;
         const topicId = await ctx.db.insert("topics", {
+          ownerId,
           folderId: await folderFor(folder.name),
           title: map.title,
           notes: map.notes,
@@ -85,11 +89,10 @@ export const seed = mutation({
 export const startRecall = mutation({
   args: { topicId: v.id("topics") },
   handler: async (ctx, { topicId }) => {
+    const topic = await requireTopic(ctx, topicId);
     const inProgress = await inProgressRecall(ctx, topicId);
     if (inProgress) return inProgress._id;
 
-    const topic = await ctx.db.get(topicId);
-    if (!topic) throw new ConvexError("Topic not found");
     const mapId = await ctx.db.insert("maps", { topicId, kind: "recall" });
     // The root is given; everything else is recalled from memory.
     await insertTree(ctx, mapId, { label: topic.title }, undefined, 0);
@@ -104,7 +107,7 @@ export const startRecall = mutation({
 export const finishRecall = mutation({
   args: { mapId: v.id("maps") },
   handler: async (ctx, { mapId }) => {
-    const map = await ctx.db.get(mapId);
+    const map = await requireMap(ctx, mapId);
     if (!map || map.kind !== "recall") throw new ConvexError("Recall attempt not found");
     if (map.finishedAt) return;
     const nodes = await ctx.db
@@ -122,8 +125,7 @@ export const finishRecall = mutation({
 export const abandonRecall = mutation({
   args: { mapId: v.id("maps") },
   handler: async (ctx, { mapId }) => {
-    const map = await ctx.db.get(mapId);
-    if (!map) return;
+    const map = await requireMap(ctx, mapId);
     if (map.kind !== "recall" || map.finishedAt) {
       throw new ConvexError("Only a recall attempt in progress can be abandoned");
     }

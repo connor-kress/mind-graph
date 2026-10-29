@@ -1,7 +1,9 @@
+import { useClerk } from "@clerk/react";
 import { useMutation } from "convex/react";
 import { useState, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { AccountMenu } from "../components/AccountMenu";
 import { Logo } from "../components/Logo";
 import {
   ChevronIcon,
@@ -14,10 +16,9 @@ import {
   SearchIcon,
   SettingsIcon,
   TrashIcon,
-  UpDownIcon,
 } from "./icons";
 import { LibraryTree, type Library } from "./LibraryTree";
-import { COMING_SOON, mockDueCount, mockProfile, mockSharedGroups } from "./mockData";
+import { COMING_SOON, mockDueCount, mockSharedGroups } from "./mockData";
 import { RowAction, SidebarRow } from "./SidebarRow";
 import { useCollapsedFolders } from "./useCollapsedFolders";
 
@@ -34,6 +35,7 @@ type Props = {
 
 /** The collapsible navigation sidebar: library, shared maps, and account. */
 export function Sidebar({ open, onToggle, library, activeTopicId, onOpenMap, onError }: Props) {
+  const { openUserProfile } = useClerk();
   const { collapsed, setOpen } = useCollapsedFolders();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const createFolder = useMutation(api.library.createFolder);
@@ -208,23 +210,13 @@ export function Sidebar({ open, onToggle, library, activeTopicId, onOpenMap, onE
 
         <div className="shrink-0 space-y-0.5 pb-2">
           <SidebarRow icon={<TrashIcon />} label="Trash" title={COMING_SOON} />
-          <SidebarRow icon={<SettingsIcon />} label="Settings" title={COMING_SOON} />
+          <SidebarRow
+            icon={<SettingsIcon />}
+            label="Account settings"
+            onClick={() => openUserProfile()}
+          />
         </div>
-        <button
-          type="button"
-          title={COMING_SOON}
-          onMouseDown={(e) => e.preventDefault()}
-          className="mx-3 flex shrink-0 items-center gap-2.5 border-t border-neutral-200 py-4 pl-1 text-left"
-        >
-          <span className="flex size-7.5 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-bold text-white">
-            {mockProfile.initials}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-semibold">{mockProfile.name}</span>
-            <span className="block truncate text-xs text-neutral-500">{mockProfile.school}</span>
-          </span>
-          <UpDownIcon className="size-4 text-neutral-400" />
-        </button>
+        <AccountMenu />
       </div>
     </aside>
   );

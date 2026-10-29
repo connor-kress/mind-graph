@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { commitEdits } from "../editor/commitEdits";
 import { ExpandIcon } from "../sidebar/icons";
+import { AccountMenu } from "./AccountMenu";
 import { Logo } from "./Logo";
 
 export type Mode = "build" | "recall" | "compare";
@@ -111,6 +112,7 @@ export function TopBar({
           })}
         </div>
         {actions}
+        {!sidebarOpen && <AccountMenu compact />}
         <button
           type="button"
           title="Switch keyboard mode (m)"
