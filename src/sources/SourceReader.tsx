@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "convex/react";
-import { ChevronLeft, ExternalLink } from "lucide-react";
+import { AArrowDown, AArrowUp, ChevronLeft, ExternalLink } from "lucide-react";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -10,6 +10,26 @@ import { ScrollArea } from "../components/ui/scroll-area";
 type Props = { sourceId: Id<"sources">; onClose: () => void };
 
 type Content = { url: string; blocks?: Block[]; failed?: boolean };
+
+const TEXT_SIZE_STORAGE_KEY = "mind-graph:source-text-size";
+/** Reading sizes in pixels; 14 matches the rest of the panel. */
+const TEXT_SIZES = [12, 14, 16, 18, 20, 24];
+const DEFAULT_TEXT_SIZE = 14;
+
+/** The reader's text size, remembered across sources and visits. */
+function useTextSize() {
+  const [size, setSize] = useState(() => {
+    const stored = Number(localStorage.getItem(TEXT_SIZE_STORAGE_KEY));
+    return TEXT_SIZES.includes(stored) ? stored : DEFAULT_TEXT_SIZE;
+  });
+  useEffect(() => localStorage.setItem(TEXT_SIZE_STORAGE_KEY, String(size)), [size]);
+  const index = TEXT_SIZES.indexOf(size);
+  return {
+    size,
+    smaller: index > 0 ? () => setSize(TEXT_SIZES[index - 1]) : undefined,
+    larger: index < TEXT_SIZES.length - 1 ? () => setSize(TEXT_SIZES[index + 1]) : undefined,
+  };
+}
 
 /** The extracted blocks at a URL. Content files never change, so each is fetched once. */
 function useContent(url: string | null) {
@@ -41,6 +61,7 @@ export function SourceReader({ sourceId, onClose }: Props) {
   const source = useQuery(api.sources.open, { sourceId });
   const retry = useMutation(api.sources.retry);
   const content = useContent(source?.contentUrl ?? null);
+  const text = useTextSize();
 
   // Deleted, here or elsewhere.
   useEffect(() => {
@@ -91,7 +112,11 @@ export function SourceReader({ sourceId, onClose }: Props) {
     const unit = source.kind === "pptx" ? "Slide" : "Page";
     body = (
       <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-4 p-5 text-sm leading-7 text-muted-foreground">
+        {/* Sizes inside are in em, so they follow the chosen text size. */}
+        <div
+          className="space-y-[1.15em] p-5 leading-[2] text-muted-foreground"
+          style={{ fontSize: text.size }}
+        >
           {content.blocks.map((block, i) => (
             <Fragment key={i}>
               {block.page && block.page !== content.blocks?.[i - 1]?.page && (
@@ -116,6 +141,26 @@ export function SourceReader({ sourceId, onClose }: Props) {
         <h3 className="min-w-0 flex-1 truncate text-xs font-medium" title={source?.name}>
           {source?.name}
         </h3>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label="Smaller text"
+          title="Smaller text"
+          disabled={!text.smaller}
+          onClick={text.smaller}
+        >
+          <AArrowDown />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label="Larger text"
+          title="Larger text"
+          disabled={!text.larger}
+          onClick={text.larger}
+        >
+          <AArrowUp />
+        </Button>
         {source?.url && (
           <Button variant="ghost" size="xs" asChild>
             <a href={source.url} target="_blank" rel="noreferrer">
@@ -138,7 +183,7 @@ function Message({ children }: { children: ReactNode }) {
 
 function PageLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-center gap-2 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70 first:pt-0">
+    <div className="flex items-center gap-2 pt-2 text-[0.8em] font-medium uppercase tracking-wide text-muted-foreground/70 first:pt-0">
       {children}
       <span className="h-px flex-1 bg-border" />
     </div>
@@ -152,7 +197,7 @@ function BlockView({ block }: { block: Block }) {
       const Tag = `h${Math.min(block.level + 3, 6)}` as "h4";
       return (
         <Tag
-          className={`pt-1 font-semibold leading-6 text-foreground ${block.level === 1 ? "text-base" : ""}`}
+          className={`pt-1 font-semibold leading-[1.7] text-foreground ${block.level === 1 ? "text-[1.15em]" : ""}`}
         >
           {block.text}
         </Tag>
@@ -165,7 +210,7 @@ function BlockView({ block }: { block: Block }) {
     case "table":
       return (
         <div className="overflow-x-auto">
-          <table className="text-xs">
+          <table className="text-[0.85em]">
             <tbody>
               {block.rows.map((row, i) => (
                 <tr key={i}>
