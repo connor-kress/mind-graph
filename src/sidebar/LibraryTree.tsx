@@ -7,6 +7,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  Trash2,
 } from "lucide-react";
 import type { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -15,12 +16,14 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "../components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import {
@@ -33,7 +36,7 @@ import {
 } from "../components/ui/sidebar";
 
 export type Library = FunctionReturnType<typeof api.library.list>;
-export type RenameTarget =
+export type LibraryTarget =
   | { kind: "folder"; id: Id<"folders">; name: string }
   | { kind: "map"; id: Id<"topics">; name: string };
 type Props = {
@@ -43,7 +46,8 @@ type Props = {
   onFolderOpenChange: (id: string, open: boolean) => void;
   onOpenMap: (id: Id<"topics">) => void;
   onNewMap: (id: Id<"folders">) => void;
-  onRename: (target: RenameTarget) => void;
+  onRename: (target: LibraryTarget) => void;
+  onDelete: (target: LibraryTarget) => void;
   busy: boolean;
 };
 
@@ -55,6 +59,7 @@ export function LibraryTree({
   onOpenMap,
   onNewMap,
   onRename,
+  onDelete,
   busy,
 }: Props) {
   return (
@@ -94,6 +99,14 @@ export function LibraryTree({
                     <Pencil />
                     Rename folder
                   </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    variant="destructive"
+                    onSelect={() => onDelete({ kind: "folder", id: folder._id, name: folder.name })}
+                  >
+                    <Trash2 />
+                    Delete folder
+                  </ContextMenuItem>
                 </ContextMenuContent>
               </ContextMenu>
               <DropdownMenu>
@@ -119,6 +132,14 @@ export function LibraryTree({
                   <DropdownMenuItem onSelect={renameFolder}>
                     <Pencil />
                     Rename folder
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => onDelete({ kind: "folder", id: folder._id, name: folder.name })}
+                  >
+                    <Trash2 />
+                    Delete folder
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -149,6 +170,16 @@ export function LibraryTree({
                               <Pencil />
                               Rename map
                             </ContextMenuItem>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem
+                              variant="destructive"
+                              onSelect={() =>
+                                onDelete({ kind: "map", id: map._id, name: map.title })
+                              }
+                            >
+                              <Trash2 />
+                              Delete map
+                            </ContextMenuItem>
                           </ContextMenuContent>
                         </ContextMenu>
                         <DropdownMenu>
@@ -166,6 +197,16 @@ export function LibraryTree({
                             <DropdownMenuItem onSelect={renameMap}>
                               <Pencil />
                               Rename map
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() =>
+                                onDelete({ kind: "map", id: map._id, name: map.title })
+                              }
+                            >
+                              <Trash2 />
+                              Delete map
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>

@@ -30,6 +30,8 @@ describe("account ownership", () => {
       () => t.mutation(api.library.createMap, { folderId }),
       () => t.mutation(api.library.renameFolder, { folderId, name: "No" }),
       () => t.mutation(api.library.renameMap, { topicId, title: "No" }),
+      () => t.mutation(api.library.deleteMap, { topicId }),
+      () => t.mutation(api.library.deleteFolder, { folderId, confirmation: "Alice's folder" }),
       () => t.mutation(api.nodes.apply, { mapId, upserts: [], removes: [] }),
       () => t.mutation(api.links.set, { mapId: recallId, links: [] }),
       () => t.mutation(api.workspace.startRecall, { topicId }),
@@ -50,6 +52,8 @@ describe("account ownership", () => {
       () => bob.mutation(api.library.createMap, { folderId }),
       () => bob.mutation(api.library.renameFolder, { folderId, name: "Stolen" }),
       () => bob.mutation(api.library.renameMap, { topicId, title: "Stolen" }),
+      () => bob.mutation(api.library.deleteMap, { topicId }),
+      () => bob.mutation(api.library.deleteFolder, { folderId, confirmation: "Alice's folder" }),
       () => bob.mutation(api.nodes.apply, { mapId, upserts: [], removes: [] }),
       () => bob.mutation(api.links.set, { mapId: recallId, links: [] }),
       () => bob.mutation(api.workspace.startRecall, { topicId }),
@@ -114,5 +118,71 @@ describe("account ownership", () => {
       );
     }
     expect((await alice.query(api.workspace.get, { topicId }))?.topic._id).toBe(topicId);
+  });
+});
+
+describe("library deletion", () => {
+  test("deleting a map removes every reference and recall node but preserves its folder and other maps", async () => {
+    const { t, alice, bob, folderId, topicId, mapId, recallId } = await fixture();
+    await alice.mutation(api.workspace.finishRecall, { mapId: recallId });
+    const activeRecall = await alice.mutation(api.workspace.startRecall, { topicId });
+    const sibling = await alice.mutation(api.library.createMap, { folderId });
+    const otherFolder = await bob.mutation(api.library.createFolder, { name: "Bob's folder" });
+    const otherTopic = await bob.mutation(api.library.createMap, { folderId: otherFolder });
+    await alice.mutation(api.library.deleteMap, { topicId });
+    await t.run(async (ctx) => {
+      expect(await ctx.db.get(topicId)).toBeNull();
+      for (const id of [mapId, recallId, activeRecall]) {
+        expect(await ctx.db.get(id)).toBeNull();
+        expect(
+          await ctx.db
+            .query("nodes")
+            .withIndex("by_map_key", (q) => q.eq("mapId", id))
+            .collect(),
+        ).toEqual([]);
+      }
+      expect(await ctx.db.get(folderId)).not.toBeNull();
+      expect(await ctx.db.get(sibling)).not.toBeNull();
+      expect(await ctx.db.get(otherTopic)).not.toBeNull();
+    });
+    expect((await alice.query(api.workspace.get, { topicId }))?.topic._id).toBe(sibling);
+  });
+
+  test("folder deletion requires the current exact name and cascades only through that folder", async () => {
+    const { t, alice, folderId, topicId } = await fixture();
+    const secondTopic = await alice.mutation(api.library.createMap, { folderId });
+    const safeFolder = await alice.mutation(api.library.createFolder, { name: "Keep" });
+    const safeTopic = await alice.mutation(api.library.createMap, { folderId: safeFolder });
+    for (const confirmation of ["", "alice's folder", "Alice's folder "]) {
+      await expect(
+        alice.mutation(api.library.deleteFolder, { folderId, confirmation }),
+      ).rejects.toThrow("doesn't match");
+    }
+    await alice.mutation(api.library.renameFolder, { folderId, name: "Renamed" });
+    await expect(
+      alice.mutation(api.library.deleteFolder, { folderId, confirmation: "Alice's folder" }),
+    ).rejects.toThrow("doesn't match");
+    await alice.mutation(api.library.deleteFolder, { folderId, confirmation: "Renamed" });
+    await t.run(async (ctx) => {
+      expect(await ctx.db.get(folderId)).toBeNull();
+      expect(await ctx.db.get(topicId)).toBeNull();
+      expect(await ctx.db.get(secondTopic)).toBeNull();
+      const maps = await ctx.db.query("maps").collect();
+      expect(maps.every((m) => m.topicId === safeTopic)).toBe(true);
+      const mapIds = new Set(maps.map((m) => m._id));
+      expect((await ctx.db.query("nodes").collect()).every((n) => mapIds.has(n.mapId))).toBe(true);
+    });
+    expect((await alice.query(api.library.list)).map((f) => f._id)).toEqual([safeFolder]);
+  });
+
+  test("deleting the last folder leaves an empty library after initialization runs again", async () => {
+    const { alice, folderId } = await fixture();
+    await alice.mutation(api.library.deleteFolder, { folderId, confirmation: "Alice's folder" });
+    await alice.mutation(api.workspace.seed);
+    expect(await alice.query(api.library.list)).toEqual([]);
+    expect(await alice.query(api.workspace.get, {})).toBeNull();
+    const freshFolder = await alice.mutation(api.library.createFolder, { name: "Fresh" });
+    const freshTopic = await alice.mutation(api.library.createMap, { folderId: freshFolder });
+    expect((await alice.query(api.workspace.get, {}))?.topic._id).toBe(freshTopic);
   });
 });
