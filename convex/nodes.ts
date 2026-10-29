@@ -2,11 +2,14 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { MAX_LABEL_LENGTH, nodeValidator, type MapNode } from "./model";
 
+import { requireMap } from "./auth";
+
 const MAX_BATCH = 2000;
 
 export const list = query({
   args: { mapId: v.id("maps") },
   handler: async (ctx, { mapId }): Promise<MapNode[]> => {
+    await requireMap(ctx, mapId);
     const docs = await ctx.db
       .query("nodes")
       .withIndex("by_map_key", (q) => q.eq("mapId", mapId))
@@ -41,8 +44,7 @@ export const apply = mutation({
     if (upserts.length + removes.length > MAX_BATCH) {
       throw new ConvexError("Too many changes at once");
     }
-    const map = await ctx.db.get(mapId);
-    if (!map) throw new ConvexError("Map not found");
+    const map = await requireMap(ctx, mapId);
     if (map.finishedAt) throw new ConvexError("This recall attempt is finished");
     const upsertKeys = new Set(upserts.map((n) => n.key));
     if (upsertKeys.size !== upserts.length || removes.some((key) => upsertKeys.has(key))) {

@@ -11,9 +11,3 @@ export const mockSharedGroups = [
     maps: ["Midterm review", "Lecture 9 concepts"],
   },
 ];
-
-export const mockProfile = {
-  name: "Julio Leonardi",
-  initials: "JL",
-  school: "University of Florida",
-};

@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { insertTree } from "./workspace";
+import { requireOwner, requireFolder, requireTopic } from "./auth";
 
 const MAX_NAME_LENGTH = 200;
 
@@ -10,7 +11,11 @@ const UNTITLED_MAP = "Untitled map";
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    const folders = await ctx.db.query("folders").collect();
+    const ownerId = await requireOwner(ctx);
+    const folders = await ctx.db
+      .query("folders")
+      .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+      .collect();
     folders.sort((a, b) => a.order - b.order);
     return Promise.all(
       folders.map(async (folder) => {
@@ -21,7 +26,9 @@ export const list = query({
         return {
           _id: folder._id,
           name: folder.name,
-          maps: topics.map((t) => ({ _id: t._id, title: t.title })),
+          maps: topics
+            .filter((t) => t.ownerId === ownerId)
+            .map((t) => ({ _id: t._id, title: t.title })),
         };
       }),
     );
@@ -31,9 +38,13 @@ export const list = query({
 export const createFolder = mutation({
   args: { name: v.string() },
   handler: async (ctx, { name }) => {
-    const folders = await ctx.db.query("folders").collect();
+    const ownerId = await requireOwner(ctx);
+    const folders = await ctx.db
+      .query("folders")
+      .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+      .collect();
     const order = Math.max(-1, ...folders.map((f) => f.order)) + 1;
-    return ctx.db.insert("folders", { name: cleanName(name), order });
+    return ctx.db.insert("folders", { ownerId, name: cleanName(name), order });
   },
 });
 
@@ -41,8 +52,12 @@ export const createFolder = mutation({
 export const createMap = mutation({
   args: { folderId: v.id("folders") },
   handler: async (ctx, { folderId }) => {
-    if (!(await ctx.db.get(folderId))) throw new ConvexError("Folder not found");
-    const topicId = await ctx.db.insert("topics", { folderId, title: UNTITLED_MAP });
+    const folder = await requireFolder(ctx, folderId);
+    const topicId = await ctx.db.insert("topics", {
+      ownerId: folder.ownerId,
+      folderId,
+      title: UNTITLED_MAP,
+    });
     const mapId = await ctx.db.insert("maps", { topicId, kind: "reference" });
     await insertTree(ctx, mapId, { label: UNTITLED_MAP }, undefined, 0);
     return topicId;
@@ -52,7 +67,7 @@ export const createMap = mutation({
 export const renameFolder = mutation({
   args: { folderId: v.id("folders"), name: v.string() },
   handler: async (ctx, { folderId, name }) => {
-    if (!(await ctx.db.get(folderId))) throw new ConvexError("Folder not found");
+    await requireFolder(ctx, folderId);
     await ctx.db.patch(folderId, { name: cleanName(name) });
   },
 });
@@ -64,8 +79,7 @@ export const renameFolder = mutation({
 export const renameMap = mutation({
   args: { topicId: v.id("topics"), title: v.string() },
   handler: async (ctx, { topicId, title }) => {
-    const topic = await ctx.db.get(topicId);
-    if (!topic) throw new ConvexError("Map not found");
+    const topic = await requireTopic(ctx, topicId);
     const next = cleanName(title);
     await ctx.db.patch(topicId, { title: next });
 
