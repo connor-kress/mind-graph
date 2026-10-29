@@ -82,15 +82,32 @@ export function fileProblem(name: string, size: number) {
 
 export type ListItem = { text: string; items?: ListItem[] };
 
+/** Nests list entries under the latest entry with a lower `level`, e.g. an indent. */
+export function nestItems(entries: { text: string; level: number }[]): ListItem[] {
+  const root: ListItem[] = [];
+  const open: { level: number; item: ListItem }[] = [];
+  for (const { text, level } of entries) {
+    const item: ListItem = { text };
+    while (open.length && open[open.length - 1].level >= level) open.pop();
+    const parent = open[open.length - 1]?.item;
+    if (parent) (parent.items ??= []).push(item);
+    else root.push(item);
+    open.push({ level, item });
+  }
+  return root;
+}
+
 /**
  * A source's text with its structure, as extracted from the file. Stored as a
  * JSON file rather than in the database, since it can exceed document limits.
+ * `page` is the PDF page or slide it starts on.
  */
-export type Block =
+export type Block = (
   | { type: "heading"; level: number; text: string }
   | { type: "paragraph"; text: string }
   | { type: "list"; ordered: boolean; items: ListItem[] }
-  | { type: "table"; rows: string[][] };
+  | { type: "table"; rows: string[][] }
+) & { page?: number };
 
 /** Bumped when extraction improves, so older sources can be read again. */
-export const EXTRACTOR_VERSION = 1;
+export const EXTRACTOR_VERSION = 2;

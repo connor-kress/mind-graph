@@ -32,12 +32,13 @@ export const open = query({
     const source = await ctx.db.get(sourceId);
     if (!source) return null;
     await requireTopic(ctx, source.topicId);
-    const { _id, name, kind, status, storageId, contentId } = source;
+    const { _id, name, kind, status, storageId, contentId, pageCount } = source;
     return {
       _id,
       name,
       kind,
       status,
+      pageCount,
       url: await ctx.storage.getUrl(storageId),
       contentUrl: contentId ? await ctx.storage.getUrl(contentId) : null,
     };
@@ -127,8 +128,9 @@ export const finish = internalMutation({
     sourceId: v.id("sources"),
     failed: v.boolean(),
     contentId: v.optional(v.id("_storage")),
+    pageCount: v.optional(v.number()),
   },
-  handler: async (ctx, { sourceId, failed, contentId }) => {
+  handler: async (ctx, { sourceId, failed, contentId, pageCount }) => {
     const source = await ctx.db.get(sourceId);
     // Deleted while it was being read.
     if (!source) {
@@ -145,6 +147,7 @@ export const finish = internalMutation({
     await ctx.db.patch(sourceId, {
       status: "ready",
       contentId,
+      pageCount,
       extractorVersion: EXTRACTOR_VERSION,
     });
   },

@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "convex/react";
 import { ChevronLeft, ExternalLink } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { Block, ListItem } from "../../convex/model";
@@ -64,21 +64,43 @@ export function SourceReader({ sourceId, onClose }: Props) {
       </Message>
     );
   } else if (!source.contentUrl) {
+    // Added before files of its kind could be read.
     body = (
       <Message>
-        A preview isn't available for {source.kind.toUpperCase()} files yet. Open the original to
-        read it.
+        This file hasn't been read yet.{" "}
+        <button
+          type="button"
+          className="font-medium text-foreground underline underline-offset-4"
+          onClick={() => retry({ sourceId }).catch(console.error)}
+        >
+          Read it now
+        </button>
       </Message>
     );
   } else if (!content) body = null;
   else if (!content.blocks) body = <Message>Couldn't load the text.</Message>;
-  else if (!content.blocks.length) body = <Message>No text found in this file.</Message>;
-  else {
+  else if (!content.blocks.length) {
+    body = (
+      <Message>
+        {source.kind === "pdf"
+          ? "This PDF has no text to show. It may be a scan; open the original to read it."
+          : "No text found in this file."}
+      </Message>
+    );
+  } else {
+    const unit = source.kind === "pptx" ? "Slide" : "Page";
     body = (
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-4 p-5 text-sm leading-7 text-muted-foreground">
           {content.blocks.map((block, i) => (
-            <BlockView key={i} block={block} />
+            <Fragment key={i}>
+              {block.page && block.page !== content.blocks?.[i - 1]?.page && (
+                <PageLabel>
+                  {unit} {block.page}
+                </PageLabel>
+              )}
+              <BlockView block={block} />
+            </Fragment>
           ))}
         </div>
       </ScrollArea>
@@ -111,6 +133,15 @@ export function SourceReader({ sourceId, onClose }: Props) {
 function Message({ children }: { children: ReactNode }) {
   return (
     <p className="px-7 py-10 text-center text-sm leading-6 text-muted-foreground">{children}</p>
+  );
+}
+
+function PageLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70 first:pt-0">
+      {children}
+      <span className="h-px flex-1 bg-border" />
+    </div>
   );
 }
 
