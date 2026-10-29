@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
+import { deleteSources } from "./sources";
 import { insertTree } from "./workspace";
 import { requireOwner, requireFolder, requireTopic } from "./auth";
 
@@ -105,7 +106,7 @@ function cleanName(name: string) {
   return trimmed;
 }
 
-/** Remove the topic, reference map, all recall attempts, and their nodes together. */
+/** Remove the topic, its sources, reference map, all recall attempts, and their nodes together. */
 async function deleteTopic(ctx: MutationCtx, topicId: Id<"topics">) {
   await requireTopic(ctx, topicId);
   const maps = await ctx.db
@@ -120,6 +121,7 @@ async function deleteTopic(ctx: MutationCtx, topicId: Id<"topics">) {
     for (const node of nodes) await ctx.db.delete(node._id);
     await ctx.db.delete(map._id);
   }
+  await deleteSources(ctx, topicId);
   await ctx.db.delete(topicId);
 }
 

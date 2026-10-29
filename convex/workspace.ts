@@ -1,7 +1,8 @@
 import { ConvexError, v } from "convex/values";
+import { internal } from "./_generated/api";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { demoLibrary, type SeedNode } from "./seedData";
+import { demoLibrary, notesMarkdown, type SeedNode } from "./seedData";
 import { requireOwner, requireTopic, requireMap } from "./auth";
 
 /**
@@ -82,7 +83,11 @@ export const seed = mutation({
           ownerId,
           folderId: await folderFor(folder.name),
           title: map.title,
-          notes: map.notes,
+        });
+        await ctx.scheduler.runAfter(0, internal.sources.importText, {
+          topicId,
+          name: `${map.notes.heading}.md`,
+          text: notesMarkdown(map.notes),
         });
         const mapId = await ctx.db.insert("maps", { topicId, kind: "reference" });
         await insertTree(ctx, mapId, { label: map.title, children: map.children }, undefined, 0);

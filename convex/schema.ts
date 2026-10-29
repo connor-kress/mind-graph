@@ -1,6 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { linkValidator, mapKind, nodeFields } from "./model";
+import { linkValidator, mapKind, nodeFields, sourceKind } from "./model";
 
 export default defineSchema({
   // Remember initialization even after the user deletes their whole library.
@@ -21,6 +21,10 @@ export default defineSchema({
     /** @deprecated Replaced by the folder's name; kept for older documents. */
     course: v.optional(v.string()),
     title: v.string(),
+    /**
+     * Legacy inline notes, now kept as sources. Remove once
+     * `migrations:notesToSources` has run on every deployment.
+     */
     notes: v.optional(
       v.object({
         heading: v.string(),
@@ -30,6 +34,20 @@ export default defineSchema({
   })
     .index("by_folder", ["folderId"])
     .index("by_owner", ["ownerId"]),
+
+  // A file in a topic's source notes. The bytes live in file storage.
+  sources: defineTable({
+    topicId: v.id("topics"),
+    storageId: v.id("_storage"),
+    name: v.string(),
+    kind: sourceKind,
+    size: v.number(),
+    /** Whether its text has been extracted (`ready` even if the kind has no extractor yet). */
+    status: v.union(v.literal("processing"), v.literal("ready"), v.literal("failed")),
+    /** Extracted blocks as JSON (see `Block`), if the kind has an extractor. */
+    contentId: v.optional(v.id("_storage")),
+    extractorVersion: v.optional(v.number()),
+  }).index("by_topic", ["topicId"]),
 
   maps: defineTable({
     topicId: v.id("topics"),

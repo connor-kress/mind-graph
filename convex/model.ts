@@ -39,3 +39,58 @@ export const linkValidator = v.object({
 });
 
 export type ManualLink = Infer<typeof linkValidator>;
+
+/** File types that can be added as source notes, by extension. */
+export const SOURCE_KINDS = {
+  md: "md",
+  markdown: "md",
+  txt: "txt",
+  docx: "docx",
+  pdf: "pdf",
+  pptx: "pptx",
+} as const;
+
+export type SourceKind = (typeof SOURCE_KINDS)[keyof typeof SOURCE_KINDS];
+
+export const sourceKind = v.union(
+  v.literal("md"),
+  v.literal("txt"),
+  v.literal("docx"),
+  v.literal("pdf"),
+  v.literal("pptx"),
+);
+
+export const MAX_SOURCE_BYTES = 15 * 1024 * 1024;
+
+export const MAX_SOURCE_NAME_LENGTH = 255;
+
+/** The kind of a file, from its name, or undefined if it isn't supported. */
+export function kindOfFile(name: string): SourceKind | undefined {
+  const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
+  return Object.hasOwn(SOURCE_KINDS, ext)
+    ? SOURCE_KINDS[ext as keyof typeof SOURCE_KINDS]
+    : undefined;
+}
+
+/** Why a file can't be added as a source, or null if it can. */
+export function fileProblem(name: string, size: number) {
+  if (!kindOfFile(name)) return `${name} isn't a supported file type`;
+  if (size > MAX_SOURCE_BYTES) return `${name} is larger than ${MAX_SOURCE_BYTES / 1024 / 1024} MB`;
+  if (name.length > MAX_SOURCE_NAME_LENGTH) return "That file name is too long";
+  return null;
+}
+
+export type ListItem = { text: string; items?: ListItem[] };
+
+/**
+ * A source's text with its structure, as extracted from the file. Stored as a
+ * JSON file rather than in the database, since it can exceed document limits.
+ */
+export type Block =
+  | { type: "heading"; level: number; text: string }
+  | { type: "paragraph"; text: string }
+  | { type: "list"; ordered: boolean; items: ListItem[] }
+  | { type: "table"; rows: string[][] };
+
+/** Bumped when extraction improves, so older sources can be read again. */
+export const EXTRACTOR_VERSION = 1;
