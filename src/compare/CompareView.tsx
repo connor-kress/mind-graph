@@ -13,6 +13,7 @@ import { ConvexError } from "convex/values";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { useImageExport } from "../editor/exportImage";
 import { ESTIMATED_SIZE, layoutTree } from "../editor/layout";
 import { buildTree, type Size, type XY } from "../editor/tree";
 import type { ManualLink } from "../../convex/model";
@@ -68,6 +69,8 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
     [saveLinks],
   );
   const flow = useReactFlow<CompareFlowNode>();
+  const wrapper = useRef<HTMLDivElement>(null);
+  useImageExport(wrapper);
   const [sizes, setSizes] = useState(() => new Map<string, Size>());
   const [selected, setSelected] = useState<string | null>(null);
   const [fitted, setFitted] = useState(false);
@@ -403,6 +406,7 @@ function Compare({ referenceMapId, resultMapId, onSummary, onError }: Props) {
 
   return (
     <div
+      ref={wrapper}
       className={`compare relative flex-1 ${fitted ? "" : "opacity-0"}`}
       onPointerDownCapture={(e) => {
         // A click outside the menu dismisses it.

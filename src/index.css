@@ -114,6 +114,17 @@ body {
   z-index: 1001;
 }
 
+/* Exported images show the map, not what's selected. */
+.exporting .react-flow__node > * {
+  transition: none;
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+}
+
+.exporting .mind-node[data-selected="true"]:not([data-variant="root"]) {
+  border-color: var(--color-neutral-800);
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: "Noto Sans Variable", ui-sans-serif, system-ui, sans-serif;

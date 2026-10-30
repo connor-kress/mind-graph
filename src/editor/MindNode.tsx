@@ -60,7 +60,7 @@ function nodeClasses(data: MindNodeData) {
 
 function MindNodeView({ id, data }: NodeProps<MindFlowNode>) {
   return (
-    <div className={nodeClasses(data)} data-selected={data.selected}>
+    <div className={nodeClasses(data)} data-selected={data.selected} data-variant={data.variant}>
       {data.variant !== "root" && (
         <Handle
           type="target"
