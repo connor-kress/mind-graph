@@ -88,12 +88,20 @@ export function TopBar({ project, title, vim, onVimToggle, notesOpen, onNotesTog
           >
             <DropdownMenuLabel>Workspace</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuCheckboxItem checked={vim} onCheckedChange={onVimToggle}>
+            <DropdownMenuCheckboxItem
+              checked={vim}
+              onCheckedChange={onVimToggle}
+              onSelect={(event) => event.preventDefault()}
+            >
               <Keyboard />
               <span className="flex-1">Vim keyboard mode</span>
               <kbd className="ml-3 text-xs text-muted-foreground">M</kbd>
             </DropdownMenuCheckboxItem>
-            <DropdownMenuCheckboxItem checked={notesOpen} onCheckedChange={onNotesToggle}>
+            <DropdownMenuCheckboxItem
+              checked={notesOpen}
+              onCheckedChange={onNotesToggle}
+              onSelect={(event) => event.preventDefault()}
+            >
               <BookOpen />
               Source notes
             </DropdownMenuCheckboxItem>
