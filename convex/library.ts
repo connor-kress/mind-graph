@@ -2,74 +2,67 @@ import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { insertTree } from "./workspace";
-import { requireOwner, requireFolder, requireTopic } from "./auth";
+import { requireUser, requireProject, requireTopic, memberProjects } from "./auth";
+
+import { insertProject, migrateTopic } from "./projectMigration";
 
 const MAX_NAME_LENGTH = 200;
 
 const UNTITLED_MAP = "Untitled map";
 
-/** Folders in order, each with its maps (topics) in creation order. */
+/** Projects the caller belongs to, with their shared maps. */
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    const ownerId = await requireOwner(ctx);
-    const folders = await ctx.db
-      .query("folders")
-      .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
-      .collect();
-    folders.sort((a, b) => a.order - b.order);
+    const userId = await requireUser(ctx);
+    const projects = await memberProjects(ctx, userId);
     return Promise.all(
-      folders.map(async (folder) => {
+      projects.map(async (project) => {
         const topics = await ctx.db
           .query("topics")
-          .withIndex("by_folder", (q) => q.eq("folderId", folder._id))
+          .withIndex("by_project", (q) => q.eq("projectId", project._id))
           .collect();
         return {
-          _id: folder._id,
-          name: folder.name,
-          maps: topics
-            .filter((t) => t.ownerId === ownerId)
-            .map((t) => ({ _id: t._id, title: t.title })),
+          _id: project._id,
+          name: project.name,
+          role: project.role,
+          maps: topics.map((topic) => ({ _id: topic._id, title: topic.title })),
         };
       }),
     );
   },
 });
 
-export const createFolder = mutation({
+export const createProject = mutation({
   args: { name: v.string() },
   handler: async (ctx, { name }) => {
-    const ownerId = await requireOwner(ctx);
-    const folders = await ctx.db
-      .query("folders")
-      .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
-      .collect();
-    const order = Math.max(-1, ...folders.map((f) => f.order)) + 1;
-    return ctx.db.insert("folders", { ownerId, name: cleanName(name), order });
+    const userId = await requireUser(ctx);
+    const projects = await memberProjects(ctx, userId);
+    return insertProject(
+      ctx,
+      userId,
+      cleanName(name),
+      Math.max(-1, ...projects.map((p) => p.order)) + 1,
+    );
   },
 });
 
-/** Creates an empty map (a topic with just its reference root) in a folder. */
 export const createMap = mutation({
-  args: { folderId: v.id("folders") },
-  handler: async (ctx, { folderId }) => {
-    const folder = await requireFolder(ctx, folderId);
-    const topicId = await ctx.db.insert("topics", {
-      ownerId: folder.ownerId,
-      folderId,
-      title: UNTITLED_MAP,
-    });
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    await requireProject(ctx, projectId);
+    const topicId = await ctx.db.insert("topics", { projectId, title: UNTITLED_MAP });
     const mapId = await ctx.db.insert("maps", { topicId, kind: "reference" });
     await insertTree(ctx, mapId, { label: UNTITLED_MAP }, undefined, 0);
     return topicId;
   },
 });
 
-export const renameFolder = mutation({
-  args: { folderId: v.id("folders"), name: v.string() },
-  handler: async (ctx, { folderId, name }) => {
-    await requireFolder(ctx, folderId);
-    await ctx.db.patch(folderId, { name: cleanName(name) });
+export const renameProject = mutation({
+  args: { projectId: v.id("projects"), name: v.string() },
+  handler: async (ctx, { projectId, name }) => {
+    await requireProject(ctx, projectId, true);
+    await ctx.db.patch(projectId, { name: cleanName(name) });
   },
 });
 
@@ -130,26 +123,48 @@ export const deleteMap = mutation({
   },
 });
 
-export const deleteFolder = mutation({
-  args: { folderId: v.id("folders"), confirmation: v.string() },
-  handler: async (ctx, { folderId, confirmation }) => {
-    const folder = await requireFolder(ctx, folderId);
-    if (confirmation !== folder.name)
-      throw new ConvexError("Folder name doesn't match. Check its current name and try again.");
+export const deleteProject = mutation({
+  args: { projectId: v.id("projects"), confirmation: v.string() },
+  handler: async (ctx, { projectId, confirmation }) => {
+    const project = await requireProject(ctx, projectId, true);
+    if (confirmation !== project.name)
+      throw new ConvexError("Project name doesn't match. Check its current name and try again.");
+    // Finish linking this project's old data if an administrative migration is still running.
+    if (project.legacyFolderId) {
+      const legacyTopics = await ctx.db
+        .query("topics")
+        .withIndex("by_folder", (q) => q.eq("folderId", project.legacyFolderId))
+        .collect();
+      for (const topic of legacyTopics)
+        if (!topic.projectId && topic.ownerId === project.createdBy) await migrateTopic(ctx, topic);
+    }
+    if (project.legacyOwnerId) {
+      const legacyTopics = await ctx.db
+        .query("topics")
+        .withIndex("by_owner", (q) => q.eq("ownerId", project.legacyOwnerId))
+        .collect();
+      for (const topic of legacyTopics) await migrateTopic(ctx, topic);
+    }
     const topics = await ctx.db
       .query("topics")
-      .withIndex("by_folder", (q) => q.eq("folderId", folderId))
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect();
     for (const topic of topics) await deleteTopic(ctx, topic._id);
-    const ownerId = folder.ownerId!;
-    if (
-      !(await ctx.db
-        .query("libraries")
-        .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
-        .first())
-    ) {
-      await ctx.db.insert("libraries", { ownerId });
+    const members = await ctx.db
+      .query("projectMembers")
+      .withIndex("by_project_user", (q) => q.eq("projectId", projectId))
+      .collect();
+    for (const member of members) {
+      // An intentionally empty account must not get demo projects on its next sign-in.
+      if (
+        !(await ctx.db
+          .query("libraries")
+          .withIndex("by_owner", (q) => q.eq("ownerId", member.userId))
+          .first())
+      )
+        await ctx.db.insert("libraries", { ownerId: member.userId });
+      await ctx.db.delete(member._id);
     }
-    await ctx.db.delete(folderId);
+    await ctx.db.delete(projectId);
   },
 });

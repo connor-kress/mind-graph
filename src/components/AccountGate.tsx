@@ -63,9 +63,6 @@ export function AccountGate({ children }: { children: ReactNode }) {
             ))}
           </div>
         </div>
-        <p className="hidden text-xs text-muted-foreground lg:block">
-          Your maps and notes belong to your private library.
-        </p>
       </section>
       <section className="flex min-w-0 flex-col items-center justify-center gap-6 px-4 py-10 sm:px-8">
         {!isLoaded || (isSignedIn && isLoading) ? (

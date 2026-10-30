@@ -70,7 +70,7 @@ export default function App() {
   const library = useQuery(api.library.list);
   const seed = useMutation(api.workspace.seed);
   const deleteMap = useMutation(api.library.deleteMap);
-  const deleteFolder = useMutation(api.library.deleteFolder);
+  const deleteProject = useMutation(api.library.deleteProject);
   const [hiddenTopicId, setHiddenTopicId] = useState<Id<"topics"> | null>(null);
   const startRecall = useMutation(api.workspace.startRecall);
   const finish = useMutation(api.workspace.finishRecall);
@@ -162,14 +162,14 @@ export default function App() {
       workspace &&
       (target.kind === "map"
         ? target.id === workspace.topic._id
-        : target.id === workspace.topic.folderId);
+        : target.id === workspace.topic.projectId);
     if (removesOpenMap) {
       commitEdits();
       // Unsubscribe the editor before its map is deleted.
       setHiddenTopicId(workspace.topic._id);
     }
     try {
-      if (target.kind === "folder") await deleteFolder({ folderId: target.id, confirmation });
+      if (target.kind === "project") await deleteProject({ projectId: target.id, confirmation });
       else await deleteMap({ topicId: target.id });
     } catch (error) {
       setHiddenTopicId(null);
@@ -339,7 +339,7 @@ export default function App() {
       />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
         <TopBar
-          folder={workspace?.folderName}
+          project={workspace?.projectName}
           title={workspace?.topic.title}
           mode={mode}
           onModeChange={(next) => {

@@ -1,8 +1,21 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import {
+  mutation,
+  query,
+  internalMutation,
+  type MutationCtx,
+  type QueryCtx,
+} from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { demoLibrary, type SeedNode } from "./seedData";
-import { requireOwner, requireTopic, requireMap } from "./auth";
+import { requireUser, requireTopic, requireMap, memberProjects, projectMembership } from "./auth";
+
+import {
+  insertProject,
+  migrateUserProjects,
+  migrateFolder,
+  migrateTopic,
+} from "./projectMigration";
 
 /**
  * A topic with its maps: the one asked for, or the first one if it's missing
@@ -11,33 +24,41 @@ import { requireOwner, requireTopic, requireMap } from "./auth";
 export const get = query({
   args: { topicId: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const ownerId = await requireOwner(ctx);
+    const userId = await requireUser(ctx);
     const topicId = args.topicId && ctx.db.normalizeId("topics", args.topicId);
     const requested = topicId ? await ctx.db.get(topicId) : null;
-    const topic =
-      requested?.ownerId === ownerId
+    let topic =
+      requested?.projectId &&
+      (await projectMembership(ctx, requested.projectId, userId)) &&
+      (await ctx.db.get(requested.projectId))
         ? requested
-        : await ctx.db
-            .query("topics")
-            .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
-            .first();
+        : null;
+    if (!topic) {
+      for (const project of await memberProjects(ctx, userId)) {
+        topic = await ctx.db
+          .query("topics")
+          .withIndex("by_project", (q) => q.eq("projectId", project._id))
+          .first();
+        if (topic) break;
+      }
+    }
     if (!topic) return null;
-    const folder = topic.folderId && (await ctx.db.get(topic.folderId));
+    const project = await ctx.db.get(topic.projectId!);
     const reference = await ctx.db
       .query("maps")
       .withIndex("by_topic_kind", (q) => q.eq("topicId", topic._id).eq("kind", "reference"))
       .first();
-    const inProgress = await inProgressRecall(ctx, topic._id);
+    const inProgress = await inProgressRecall(ctx, topic._id, userId);
     const finished = await ctx.db
       .query("maps")
-      .withIndex("by_topic_kind_finished", (q) =>
-        q.eq("topicId", topic._id).eq("kind", "recall").gt("finishedAt", 0),
+      .withIndex("by_topic_user_kind_finished", (q) =>
+        q.eq("topicId", topic._id).eq("userId", userId).eq("kind", "recall").gt("finishedAt", 0),
       )
       .order("desc")
       .first();
     return {
       topic,
-      folderName: folder ? folder.name : (topic.course ?? null),
+      projectName: project!.name,
       referenceMapId: reference?._id ?? null,
       /** The recall attempt being worked on, if any. */
       recallMapId: inProgress?._id ?? null,
@@ -47,40 +68,26 @@ export const get = query({
   },
 });
 
-/** Creates a private demo library once for each account. Legacy data stays unclaimed. */
+/** Migrate the account's old data, then initialize new accounts once. */
 export const seed = mutation({
   args: {},
   handler: async (ctx) => {
-    const ownerId = await requireOwner(ctx);
-    const initialized = await ctx.db
-      .query("libraries")
-      .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
-      .first();
-    if (initialized) return;
-    await ctx.db.insert("libraries", { ownerId });
+    const userId = await requireUser(ctx);
+    await migrateUserProjects(ctx, userId);
     if (
       await ctx.db
-        .query("folders")
-        .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+        .query("libraries")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
         .first()
     )
       return;
-    const folderIds = new Map<string, Id<"folders">>();
-    const folderFor = async (name: string) => {
-      let folderId = folderIds.get(name);
-      if (!folderId) {
-        folderId = await ctx.db.insert("folders", { ownerId, name, order: folderIds.size });
-        folderIds.set(name, folderId);
-      }
-      return folderId;
-    };
-    for (const folder of demoLibrary) await folderFor(folder.name);
-
-    for (const folder of demoLibrary) {
-      for (const map of folder.maps) {
+    await ctx.db.insert("libraries", { ownerId: userId });
+    if ((await memberProjects(ctx, userId)).length) return;
+    for (const [order, project] of demoLibrary.entries()) {
+      const projectId = await insertProject(ctx, userId, project.name, order);
+      for (const map of project.maps) {
         const topicId = await ctx.db.insert("topics", {
-          ownerId,
-          folderId: await folderFor(folder.name),
+          projectId,
           title: map.title,
           notes: map.notes,
         });
@@ -91,15 +98,36 @@ export const seed = mutation({
   },
 });
 
+/** Optional administrative backfill. Run each phase until isDone; it is safe to repeat. */
+export const migrateProjects = internalMutation({
+  args: {
+    phase: v.union(v.literal("folders"), v.literal("topics")),
+    cursor: v.optional(v.string()),
+  },
+  handler: async (ctx, { phase, cursor }) => {
+    if (phase === "folders") {
+      const result = await ctx.db
+        .query("folders")
+        .paginate({ cursor: cursor ?? null, numItems: 25 });
+      for (const folder of result.page) await migrateFolder(ctx, folder);
+      return { cursor: result.continueCursor, isDone: result.isDone };
+    }
+    const result = await ctx.db.query("topics").paginate({ cursor: cursor ?? null, numItems: 25 });
+    for (const topic of result.page) await migrateTopic(ctx, topic);
+    return { cursor: result.continueCursor, isDone: result.isDone };
+  },
+});
+
 /** Returns the in-progress recall attempt, creating one if needed. */
 export const startRecall = mutation({
   args: { topicId: v.id("topics") },
   handler: async (ctx, { topicId }) => {
+    const userId = await requireUser(ctx);
     const topic = await requireTopic(ctx, topicId);
-    const inProgress = await inProgressRecall(ctx, topicId);
+    const inProgress = await inProgressRecall(ctx, topicId, userId);
     if (inProgress) return inProgress._id;
 
-    const mapId = await ctx.db.insert("maps", { topicId, kind: "recall" });
+    const mapId = await ctx.db.insert("maps", { topicId, kind: "recall", userId });
     // The root is given; everything else is recalled from memory.
     await insertTree(ctx, mapId, { label: topic.title }, undefined, 0);
     return mapId;
@@ -144,12 +172,16 @@ export const abandonRecall = mutation({
   },
 });
 
-/** The topic's recall attempt in progress (there's at most one). */
-function inProgressRecall(ctx: QueryCtx, topicId: Id<"topics">) {
+/** Each member has their own attempt in progress for a topic. */
+function inProgressRecall(ctx: QueryCtx, topicId: Id<"topics">, userId: string) {
   return ctx.db
     .query("maps")
-    .withIndex("by_topic_kind_finished", (q) =>
-      q.eq("topicId", topicId).eq("kind", "recall").eq("finishedAt", undefined),
+    .withIndex("by_topic_user_kind_finished", (q) =>
+      q
+        .eq("topicId", topicId)
+        .eq("userId", userId)
+        .eq("kind", "recall")
+        .eq("finishedAt", undefined),
     )
     .first();
 }
