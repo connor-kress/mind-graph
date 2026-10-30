@@ -50,7 +50,6 @@ type Props = {
   onNewMap: (id: Id<"projects">) => void;
   onRename: (target: LibraryTarget) => void;
   onDelete: (target: LibraryTarget) => void;
-  busy: boolean;
 };
 
 export function LibraryTree({
@@ -62,7 +61,6 @@ export function LibraryTree({
   onNewMap,
   onRename,
   onDelete,
-  busy,
 }: Props) {
   return (
     <SidebarMenu>
@@ -96,7 +94,7 @@ export function LibraryTree({
                     className="w-44 whitespace-nowrap"
                     onKeyDown={(e) => e.stopPropagation()}
                   >
-                    <ContextMenuItem disabled={busy} onSelect={() => onNewMap(project._id)}>
+                    <ContextMenuItem onSelect={() => onNewMap(project._id)}>
                       <Plus />
                       New map
                     </ContextMenuItem>
@@ -125,7 +123,6 @@ export function LibraryTree({
                     <SidebarMenuAction
                       type="button"
                       showOnHover
-                      disabled={busy}
                       aria-label={`Add map to ${project.name}`}
                       onClick={() => onNewMap(project._id)}
                       className="top-2! right-7 group-hover/project-row:opacity-100 group-has-[:focus-visible]/project-row:opacity-100"
@@ -151,7 +148,7 @@ export function LibraryTree({
                     align="start"
                     onKeyDown={(e) => e.stopPropagation()}
                   >
-                    <DropdownMenuItem disabled={busy} onSelect={() => onNewMap(project._id)}>
+                    <DropdownMenuItem onSelect={() => onNewMap(project._id)}>
                       <Plus />
                       New map
                     </DropdownMenuItem>

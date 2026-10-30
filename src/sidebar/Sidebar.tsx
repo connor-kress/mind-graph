@@ -1,6 +1,6 @@
 import { useMutation } from "convex/react";
 import { FolderPlus as ProjectPlus, Plus, Search } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { AccountMenu } from "../components/AccountMenu";
@@ -38,6 +38,7 @@ import {
 } from "../components/ui/sidebar";
 import { LibraryTree, type Library, type LibraryTarget } from "./LibraryTree";
 import { CreateMapDialog } from "./CreateMapDialog";
+import { CreateProjectDialog } from "./CreateProjectDialog";
 import { DeleteLibraryDialog } from "./DeleteLibraryDialog";
 import { useCollapsedProjects } from "./useCollapsedProjects";
 
@@ -45,11 +46,10 @@ type Props = {
   library?: Library;
   activeTopicId?: Id<"topics">;
   onOpenMap: (id: Id<"topics">) => void;
-  onError: (message: string) => void;
   onDelete: (target: LibraryTarget, confirmation: string) => Promise<void>;
 };
 
-export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }: Props) {
+export function Sidebar({ library, activeTopicId, onOpenMap, onDelete }: Props) {
   const { collapsed, setOpen } = useCollapsedProjects();
   const { setOpenMobile } = useSidebar();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -57,11 +57,9 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
   const [creatingMap, setCreatingMap] = useState<{ projectId?: Id<"projects"> } | null>(null);
   const [deleting, setDeleting] = useState<LibraryTarget | null>(null);
   const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const working = useRef(false);
+  const [creatingProject, setCreatingProject] = useState(false);
   const [saving, setSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
-  const createProject = useMutation(api.library.createProject);
   const renameProject = useMutation(api.library.renameProject);
   const renameMap = useMutation(api.library.renameMap);
 
@@ -85,21 +83,6 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
     setName(target.name);
     setRenameError(null);
     setRenaming(target);
-  };
-  const newProject = async () => {
-    if (working.current) return;
-    working.current = true;
-    setBusy(true);
-    try {
-      const id = await createProject({ name: "Untitled project" });
-      setOpen(id, true);
-      startRename({ kind: "project", id, name: "Untitled project" });
-    } catch {
-      onError("Couldn't create the project");
-    } finally {
-      working.current = false;
-      setBusy(false);
-    }
   };
   const newMap = (projectId?: Id<"projects">) => setCreatingMap({ projectId });
   const currentProjectId =
@@ -127,7 +110,7 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
           </Button>
           <Button
             className="w-full justify-start"
-            disabled={!library || busy}
+            disabled={!library}
             onClick={() => void newMap(currentProjectId)}
           >
             <Plus />
@@ -140,8 +123,8 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
             <SidebarGroupAction
               title="New project"
               aria-label="New project"
-              disabled={!library || busy}
-              onClick={() => void newProject()}
+              disabled={!library}
+              onClick={() => setCreatingProject(true)}
             >
               <ProjectPlus />
             </SidebarGroupAction>
@@ -155,7 +138,6 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
                 onNewMap={(id) => void newMap(id)}
                 onRename={startRename}
                 onDelete={setDeleting}
-                busy={busy}
               />
             ) : (
               <>
@@ -174,6 +156,12 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
           <AccountMenu />
         </SidebarFooter>
       </SidebarShell>
+      {creatingProject && (
+        <CreateProjectDialog
+          onClose={() => setCreatingProject(false)}
+          onCreated={(projectId) => setOpen(projectId, true)}
+        />
+      )}
       {creatingMap && (
         <CreateMapDialog
           projectId={creatingMap.projectId}
