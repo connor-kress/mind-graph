@@ -14,6 +14,7 @@ import type * as extractPdf from "../extractPdf.js";
 import type * as extractSlides from "../extractSlides.js";
 import type * as library from "../library.js";
 import type * as links from "../links.js";
+import type * as mapFile from "../mapFile.js";
 import type * as migrations from "../migrations.js";
 import type * as model from "../model.js";
 import type * as nodes from "../nodes.js";
@@ -35,6 +36,7 @@ declare const fullApi: ApiFromModules<{
   extractSlides: typeof extractSlides;
   library: typeof library;
   links: typeof links;
+  mapFile: typeof mapFile;
   migrations: typeof migrations;
   model: typeof model;
   nodes: typeof nodes;

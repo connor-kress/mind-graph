@@ -1,4 +1,4 @@
-import { BookOpen, ImageDown, Keyboard, MoreHorizontal } from "lucide-react";
+import { BookOpen, FileJson, ImageDown, Keyboard, MoreHorizontal } from "lucide-react";
 import { AccountMenu } from "./AccountMenu";
 import {
   Breadcrumb,
@@ -21,6 +21,11 @@ import { Separator } from "./ui/separator";
 import { SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
+const EXPORTS = [
+  { format: "png", label: "Export as PNG", Icon: ImageDown },
+  { format: "json", label: "Export as JSON", Icon: FileJson },
+] as const;
+
 type Props = {
   project?: string | null;
   title?: string;
@@ -28,7 +33,7 @@ type Props = {
   onVimToggle: () => void;
   notesOpen: boolean;
   onNotesToggle: () => void;
-  onExport: () => void;
+  onExport: (format: "png" | "json") => void;
   /** Why the map can't be exported right now, if it can't. */
   exportDisabled?: string;
 };
@@ -119,22 +124,24 @@ export function TopBar({
               Source notes
             </DropdownMenuCheckboxItem>
             <DropdownMenuSeparator />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuItem
-                  aria-disabled={!!exportDisabled}
-                  onSelect={(event) => {
-                    if (exportDisabled) event.preventDefault();
-                    else onExport();
-                  }}
-                  className={exportDisabled ? "cursor-not-allowed opacity-40" : ""}
-                >
-                  <ImageDown />
-                  Export as PNG
-                </DropdownMenuItem>
-              </TooltipTrigger>
-              {exportDisabled && <TooltipContent side="left">{exportDisabled}</TooltipContent>}
-            </Tooltip>
+            {EXPORTS.map(({ format, label, Icon }) => (
+              <Tooltip key={format}>
+                <TooltipTrigger asChild>
+                  <DropdownMenuItem
+                    aria-disabled={!!exportDisabled}
+                    onSelect={(event) => {
+                      if (exportDisabled) event.preventDefault();
+                      else onExport(format);
+                    }}
+                    className={exportDisabled ? "cursor-not-allowed opacity-40" : ""}
+                  >
+                    <Icon />
+                    {label}
+                  </DropdownMenuItem>
+                </TooltipTrigger>
+                {exportDisabled && <TooltipContent side="left">{exportDisabled}</TooltipContent>}
+              </Tooltip>
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
         {(!open || isMobile) && <AccountMenu compact />}

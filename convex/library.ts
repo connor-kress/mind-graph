@@ -1,6 +1,8 @@
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
+import { checkNodes, withNewKeys } from "./mapFile";
+import { nodeValidator } from "./model";
 import { deleteSources } from "./sources";
 import { insertTree } from "./workspace";
 import { requireUser, requireProject, requireTopic, memberProjects } from "./auth";
@@ -64,6 +66,24 @@ export const createMap = mutation({
     const topicId = await ctx.db.insert("topics", { projectId, title: name });
     const mapId = await ctx.db.insert("maps", { topicId, kind: "reference" });
     await insertTree(ctx, mapId, { label: name }, undefined, 0);
+    return topicId;
+  },
+});
+
+/** Creates a map in a project from an imported map file's nodes. */
+export const importMap = mutation({
+  args: { projectId: v.id("projects"), title: v.string(), nodes: v.array(nodeValidator) },
+  handler: async (ctx, { projectId, title, nodes }) => {
+    await requireProject(ctx, projectId);
+    const name = cleanName(title);
+    try {
+      checkNodes(nodes);
+    } catch (error) {
+      throw new ConvexError(error instanceof Error ? error.message : "This map can't be imported");
+    }
+    const topicId = await ctx.db.insert("topics", { projectId, title: name });
+    const mapId = await ctx.db.insert("maps", { topicId, kind: "reference" });
+    for (const node of withNewKeys(nodes)) await ctx.db.insert("nodes", { mapId, ...node });
     return topicId;
   },
 });

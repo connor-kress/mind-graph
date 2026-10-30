@@ -4,12 +4,13 @@ import { ConvexError } from "convex/values";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { toMapFile } from "../convex/mapFile";
 import type { CompareSummary } from "./compare/compare";
 import { CompareView } from "./compare/CompareView";
 import { NotesPanel } from "./components/NotesPanel";
 import { RecallStart } from "./components/RecallStart";
 import { commitEdits } from "./editor/commitEdits";
-import { downloadMapImage, fileName } from "./editor/exportImage";
+import { downloadMapFile, downloadMapImage, fileName } from "./editor/exportImage";
 import { TopBar } from "./components/TopBar";
 import { MapControls, type Mode } from "./components/MapControls";
 import { isTextInput } from "./editor/isTextInput";
@@ -157,6 +158,14 @@ export default function App() {
     setRequestedMode("build");
     setSummary(null);
     setError(null);
+  };
+
+  // The reference map as saved, including a label still being typed.
+  const exportMapFile = async (title: string, mapId: Id<"maps"> | null, name: string) => {
+    if (!mapId) throw new Error("This map has no reference map");
+    commitEdits();
+    const nodes = await convex.query(api.nodes.list, { mapId });
+    downloadMapFile(name, toMapFile(title, nodes));
   };
 
   const removeFromLibrary = async (target: LibraryTarget, confirmation: string) => {
@@ -346,11 +355,15 @@ export default function App() {
           onVimToggle={toggleVim}
           notesOpen={notesOpen}
           onNotesToggle={() => setNotesOpen((open) => !open)}
-          onExport={() => {
+          onExport={(format) => {
             if (!workspace) return;
             const name = fileName(workspace.topic.title);
             setError(null);
-            downloadMapImage(mode === "compare" ? `${name}-compare` : name).catch((e) => {
+            const exported =
+              format === "png"
+                ? downloadMapImage(mode === "compare" ? `${name}-compare` : name)
+                : exportMapFile(workspace.topic.title, workspace.referenceMapId, name);
+            exported.catch((e) => {
               console.error("Failed to export map", e);
               setError("Couldn't export the map");
             });

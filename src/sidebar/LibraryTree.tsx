@@ -2,6 +2,7 @@ import type { FunctionReturnType } from "convex/server";
 import {
   ChevronRight,
   FileText,
+  FileUp,
   FolderKanban as Project,
   FolderOpen as ProjectOpen,
   MoreHorizontal,
@@ -9,6 +10,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
+import { useState, type DragEvent } from "react";
 import type { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
@@ -48,6 +50,9 @@ type Props = {
   onProjectOpenChange: (id: string, open: boolean) => void;
   onOpenMap: (id: Id<"topics">) => void;
   onNewMap: (id: Id<"projects">) => void;
+  onImportMap: (id: Id<"projects">) => void;
+  /** A file was dropped on a project, to import as a map. */
+  onDropMapFile: (id: Id<"projects">, file: File) => void;
   onRename: (target: LibraryTarget) => void;
   onDelete: (target: LibraryTarget) => void;
 };
@@ -59,9 +64,32 @@ export function LibraryTree({
   onProjectOpenChange,
   onOpenMap,
   onNewMap,
+  onImportMap,
+  onDropMapFile,
   onRename,
   onDelete,
 }: Props) {
+  const [dropTarget, setDropTarget] = useState<Id<"projects"> | null>(null);
+  const dropZone = (projectId: Id<"projects">) => ({
+    onDragOver: (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      setDropTarget(projectId);
+    },
+    onDragLeave: (e: DragEvent) => {
+      // Moving onto a child element also leaves this one.
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+        setDropTarget((target) => (target === projectId ? null : target));
+    },
+    onDrop: (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDropTarget(null);
+      const file = e.dataTransfer.files[0];
+      if (file) onDropMapFile(projectId, file);
+    },
+  });
   return (
     <SidebarMenu>
       {library.map((project) => {
@@ -76,7 +104,14 @@ export function LibraryTree({
             onOpenChange={(next) => onProjectOpenChange(project._id, next)}
             asChild
           >
-            <SidebarMenuItem>
+            <SidebarMenuItem
+              {...dropZone(project._id)}
+              className={
+                dropTarget === project._id
+                  ? "rounded-md bg-sidebar-accent/60 ring-2 ring-sidebar-ring ring-inset"
+                  : undefined
+              }
+            >
               <div className="group/project-row relative">
                 <ContextMenu>
                   <ContextMenuTrigger asChild>
@@ -97,6 +132,10 @@ export function LibraryTree({
                     <ContextMenuItem onSelect={() => onNewMap(project._id)}>
                       <Plus />
                       New map
+                    </ContextMenuItem>
+                    <ContextMenuItem onSelect={() => onImportMap(project._id)}>
+                      <FileUp />
+                      Import map…
                     </ContextMenuItem>
                     {canManage && (
                       <>
@@ -151,6 +190,10 @@ export function LibraryTree({
                     <DropdownMenuItem onSelect={() => onNewMap(project._id)}>
                       <Plus />
                       New map
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onImportMap(project._id)}>
+                      <FileUp />
+                      Import map…
                     </DropdownMenuItem>
                     {canManage && (
                       <>
@@ -258,3 +301,5 @@ export function LibraryTree({
     </SidebarMenu>
   );
 }
+
+const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
