@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
-// Collapsed folders are remembered, so new folders start out expanded.
-const COLLAPSED_STORAGE_KEY = "mind-graph:collapsed-folders";
+// Collapsed projects are remembered, so new projects start out expanded.
+const COLLAPSED_STORAGE_KEY = "mind-graph:collapsed-projects";
 
 function loadCollapsed(): Set<string> {
   try {
@@ -11,8 +11,8 @@ function loadCollapsed(): Set<string> {
   }
 }
 
-/** Which folders are collapsed, remembered in this browser. */
-export function useCollapsedFolders() {
+/** Which projects are collapsed, remembered in this browser. */
+export function useCollapsedProjects() {
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   useEffect(
     () => localStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify([...collapsed])),

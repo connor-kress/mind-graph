@@ -24,8 +24,8 @@ export function DeleteLibraryDialog({ target, onClose, onConfirm }: Props) {
   const [pending, setPending] = useState(false);
   const submitting = useRef(false);
   const [error, setError] = useState<string | null>(null);
-  const folder = target.kind === "folder";
-  const allowed = !folder || confirmation === target.name;
+  const project = target.kind === "project";
+  const allowed = !project || confirmation === target.name;
   return (
     <AlertDialog
       open
@@ -64,7 +64,7 @@ export function DeleteLibraryDialog({ target, onClose, onConfirm }: Props) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {target.kind}?</AlertDialogTitle>
             <AlertDialogDescription className="break-words">
-              {folder ? (
+              {project ? (
                 <>
                   “{target.name}” and all maps, notes, and recall attempts inside it will be
                   permanently deleted.
@@ -77,13 +77,13 @@ export function DeleteLibraryDialog({ target, onClose, onConfirm }: Props) {
               This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {folder && (
+          {project && (
             <div className="space-y-2">
-              <label htmlFor="delete-folder-name" className="block text-sm break-words">
+              <label htmlFor="delete-project-name" className="block text-sm break-words">
                 Type <span className="font-semibold">{target.name}</span> to confirm.
               </label>
               <Input
-                id="delete-folder-name"
+                id="delete-project-name"
                 autoComplete="off"
                 value={confirmation}
                 disabled={pending}

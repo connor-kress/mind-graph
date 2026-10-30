@@ -7,11 +7,11 @@ export type SeedMap = {
   children: SeedNode[];
 };
 
-export type SeedFolder = { name: string; maps: SeedMap[] };
+export type SeedProject = { name: string; maps: SeedMap[] };
 
-export const demoLibrary: SeedFolder[] = [
+export const demoLibrary: SeedProject[] = [
   {
-    name: "Biology 101",
+    name: "Example Project",
     maps: [
       {
         title: "Cellular respiration",
@@ -40,48 +40,6 @@ export const demoLibrary: SeedFolder[] = [
         ],
       },
       {
-        title: "Photosynthesis",
-        notes: {
-          heading: "Lecture 8: Photosynthesis",
-          paragraphs: [
-            "The light-dependent reactions happen in the thylakoid membranes, splitting water and releasing oxygen.",
-            "They produce ATP and NADPH, which power the Calvin cycle.",
-            "The Calvin cycle, in the stroma, fixes carbon dioxide into sugar.",
-          ],
-        },
-        children: [
-          {
-            label: "Light reactions",
-            children: [{ label: "Thylakoid" }, { label: "Release O₂" }, { label: "ATP + NADPH" }],
-          },
-          {
-            label: "Calvin cycle",
-            children: [{ label: "Stroma" }, { label: "Fixes CO₂" }],
-          },
-        ],
-      },
-      {
-        title: "Cell structure",
-        notes: {
-          heading: "Lecture 3: Cell structure",
-          paragraphs: [
-            "The nucleus holds the cell's DNA and controls gene expression.",
-            "Ribosomes build proteins, either free in the cytoplasm or on the rough ER.",
-            "The plasma membrane is a phospholipid bilayer that controls what enters and leaves the cell.",
-          ],
-        },
-        children: [
-          { label: "Nucleus", children: [{ label: "DNA" }] },
-          { label: "Ribosomes", children: [{ label: "Proteins" }, { label: "Rough ER" }] },
-          { label: "Plasma membrane", children: [{ label: "Phospholipid bilayer" }] },
-        ],
-      },
-    ],
-  },
-  {
-    name: "Statistics 3022",
-    maps: [
-      {
         title: "Hypothesis testing",
         notes: {
           heading: "Week 5: Hypothesis testing",
@@ -95,27 +53,6 @@ export const demoLibrary: SeedFolder[] = [
           { label: "Hypotheses", children: [{ label: "Null" }, { label: "Alternative" }] },
           { label: "p-value" },
           { label: "Errors", children: [{ label: "Type I" }, { label: "Type II" }] },
-        ],
-      },
-    ],
-  },
-  {
-    name: "Organic Chemistry",
-    maps: [
-      {
-        title: "Functional groups",
-        notes: {
-          heading: "Chapter 2: Functional groups",
-          paragraphs: [
-            "Alcohols contain a hydroxyl group (–OH) and can form hydrogen bonds.",
-            "Carbonyl groups (C=O) appear in aldehydes and ketones.",
-            "Carboxylic acids combine a carbonyl and a hydroxyl, and are acidic.",
-          ],
-        },
-        children: [
-          { label: "Alcohols", children: [{ label: "–OH" }] },
-          { label: "Carbonyls", children: [{ label: "Aldehydes" }, { label: "Ketones" }] },
-          { label: "Carboxylic acids", children: [{ label: "–COOH" }] },
         ],
       },
     ],

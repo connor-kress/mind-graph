@@ -31,7 +31,7 @@ const MODES = [
   { id: "compare", label: "Compare", icon: Columns2 },
 ] as const;
 type Props = {
-  folder?: string | null;
+  project?: string | null;
   title?: string;
   mode: Mode;
   onModeChange: (mode: Mode) => void;
@@ -45,7 +45,7 @@ type Props = {
 };
 
 export function TopBar({
-  folder,
+  project,
   title,
   mode,
   onModeChange,
@@ -67,10 +67,10 @@ export function TopBar({
           <BreadcrumbList className="flex-nowrap text-xs">
             <BreadcrumbItem className="hidden sm:block">My library</BreadcrumbItem>
             <BreadcrumbSeparator className="hidden sm:block" />
-            {folder && (
+            {project && (
               <>
                 <BreadcrumbItem className="hidden min-w-0 truncate lg:block">
-                  {folder}
+                  {project}
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden lg:block" />
               </>

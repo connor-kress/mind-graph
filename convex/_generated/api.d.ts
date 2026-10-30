@@ -13,6 +13,7 @@ import type * as library from "../library.js";
 import type * as links from "../links.js";
 import type * as model from "../model.js";
 import type * as nodes from "../nodes.js";
+import type * as projectMigration from "../projectMigration.js";
 import type * as seedData from "../seedData.js";
 import type * as workspace from "../workspace.js";
 
@@ -28,6 +29,7 @@ declare const fullApi: ApiFromModules<{
   links: typeof links;
   model: typeof model;
   nodes: typeof nodes;
+  projectMigration: typeof projectMigration;
   seedData: typeof seedData;
   workspace: typeof workspace;
 }>;

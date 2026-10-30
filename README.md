@@ -15,9 +15,9 @@ pnpm dev:convex   # Configure/sync your Convex dev deployment
 pnpm dev          # Start Vite in another terminal
 ```
 
-See `.env.example` for local configuration. Each signed-in account gets a private demo library. The account menu provides profile settings and sign-out.
+See `.env.example` for local configuration. Each new account starts as the sole owner of "Example Project", containing Cellular respiration and Hypothesis testing maps. The account menu provides profile settings and sign-out.
 
-Authentication uses email/password, with Google and mandatory email verification disabled. Convex verifies Clerk tokens and checks ownership on all map operations. Data created before accounts existed stays stored but unclaimed.
+Authentication uses email/password, with Google and mandatory email verification disabled. Convex checks project membership on all map operations. Owners manage projects; members share maps and notes and can edit maps. Recall attempts and comparisons stay private to each member. Invitations are not implemented yet.
 
 ```sh
 pnpm test
@@ -26,7 +26,9 @@ pnpm lint
 pnpm exec tsc -p convex/tsconfig.json --noEmit
 ```
 
-The sidebar supports map search with `Ctrl`/`Cmd` + `K` and collapses with `Ctrl`/`Cmd` + `\`. Folder and map actions are available from their menus or a right-click.
+The sidebar supports map search with `Ctrl`/`Cmd` + `K` and collapses with `Ctrl`/`Cmd` + `\`. Project and map actions are available from their menus or a right-click.
+
+Existing account-owned folders migrate to projects on sign-in, preserving map URLs and recall history. The internal `workspace:migrateProjects` backfill accepts `phase: "folders"` or `phase: "topics"` and an optional `cursor`; finish the folders phase before running topics, passing each returned cursor until `isDone`. Legacy tables remain for migration compatibility, and pre-account data stays unclaimed.
 
 ## Editing the map
 

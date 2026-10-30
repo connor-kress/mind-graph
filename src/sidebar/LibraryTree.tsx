@@ -2,8 +2,8 @@ import type { FunctionReturnType } from "convex/server";
 import {
   ChevronRight,
   FileText,
-  Folder,
-  FolderOpen,
+  FolderKanban as Project,
+  FolderOpen as ProjectOpen,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -37,15 +37,15 @@ import {
 
 export type Library = FunctionReturnType<typeof api.library.list>;
 export type LibraryTarget =
-  | { kind: "folder"; id: Id<"folders">; name: string }
+  | { kind: "project"; id: Id<"projects">; name: string }
   | { kind: "map"; id: Id<"topics">; name: string };
 type Props = {
   library: Library;
   activeTopicId?: Id<"topics">;
   collapsed: Set<string>;
-  onFolderOpenChange: (id: string, open: boolean) => void;
+  onProjectOpenChange: (id: string, open: boolean) => void;
   onOpenMap: (id: Id<"topics">) => void;
-  onNewMap: (id: Id<"folders">) => void;
+  onNewMap: (id: Id<"projects">) => void;
   onRename: (target: LibraryTarget) => void;
   onDelete: (target: LibraryTarget) => void;
   busy: boolean;
@@ -55,7 +55,7 @@ export function LibraryTree({
   library,
   activeTopicId,
   collapsed,
-  onFolderOpenChange,
+  onProjectOpenChange,
   onOpenMap,
   onNewMap,
   onRename,
@@ -64,26 +64,31 @@ export function LibraryTree({
 }: Props) {
   return (
     <SidebarMenu>
-      {library.map((folder) => {
-        const open = !collapsed.has(folder._id);
-        const renameFolder = () => onRename({ kind: "folder", id: folder._id, name: folder.name });
+      {library.map((project) => {
+        const open = !collapsed.has(project._id);
+        const canManage = project.role === "owner";
+        const renameProject = () =>
+          onRename({ kind: "project", id: project._id, name: project.name });
         return (
           <Collapsible
-            key={folder._id}
+            key={project._id}
             open={open}
-            onOpenChange={(next) => onFolderOpenChange(folder._id, next)}
+            onOpenChange={(next) => onProjectOpenChange(project._id, next)}
             asChild
           >
             <SidebarMenuItem>
               <ContextMenu>
                 <ContextMenuTrigger asChild>
                   <CollapsibleTrigger asChild>
-                    <SidebarMenuButton onDoubleClick={renameFolder} className="h-9 pr-8">
+                    <SidebarMenuButton
+                      onDoubleClick={canManage ? renameProject : undefined}
+                      className="h-9 pr-8"
+                    >
                       <ChevronRight
                         className={`size-3.5 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
                       />
-                      {open ? <FolderOpen /> : <Folder />}
-                      <span>{folder.name}</span>
+                      {open ? <ProjectOpen /> : <Project />}
+                      <span>{project.name}</span>
                     </SidebarMenuButton>
                   </CollapsibleTrigger>
                 </ContextMenuTrigger>
@@ -91,29 +96,35 @@ export function LibraryTree({
                   className="w-44 whitespace-nowrap"
                   onKeyDown={(e) => e.stopPropagation()}
                 >
-                  <ContextMenuItem disabled={busy} onSelect={() => onNewMap(folder._id)}>
+                  <ContextMenuItem disabled={busy} onSelect={() => onNewMap(project._id)}>
                     <Plus />
                     New map
                   </ContextMenuItem>
-                  <ContextMenuItem onSelect={renameFolder}>
-                    <Pencil />
-                    Rename folder
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    variant="destructive"
-                    onSelect={() => onDelete({ kind: "folder", id: folder._id, name: folder.name })}
-                  >
-                    <Trash2 />
-                    Delete folder
-                  </ContextMenuItem>
+                  {canManage && (
+                    <>
+                      <ContextMenuItem onSelect={renameProject}>
+                        <Pencil />
+                        Rename project
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        variant="destructive"
+                        onSelect={() =>
+                          onDelete({ kind: "project", id: project._id, name: project.name })
+                        }
+                      >
+                        <Trash2 />
+                        Delete project
+                      </ContextMenuItem>
+                    </>
+                  )}
                 </ContextMenuContent>
               </ContextMenu>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <SidebarMenuAction
                     showOnHover
-                    aria-label={`Actions for ${folder.name}`}
+                    aria-label={`Actions for ${project.name}`}
                     className="top-2"
                   >
                     <MoreHorizontal />
@@ -125,27 +136,33 @@ export function LibraryTree({
                   align="start"
                   onKeyDown={(e) => e.stopPropagation()}
                 >
-                  <DropdownMenuItem disabled={busy} onSelect={() => onNewMap(folder._id)}>
+                  <DropdownMenuItem disabled={busy} onSelect={() => onNewMap(project._id)}>
                     <Plus />
                     New map
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={renameFolder}>
-                    <Pencil />
-                    Rename folder
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onSelect={() => onDelete({ kind: "folder", id: folder._id, name: folder.name })}
-                  >
-                    <Trash2 />
-                    Delete folder
-                  </DropdownMenuItem>
+                  {canManage && (
+                    <>
+                      <DropdownMenuItem onSelect={renameProject}>
+                        <Pencil />
+                        Rename project
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onSelect={() =>
+                          onDelete({ kind: "project", id: project._id, name: project.name })
+                        }
+                      >
+                        <Trash2 />
+                        Delete project
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
               <CollapsibleContent>
                 <SidebarMenuSub className="mr-0 pr-0">
-                  {folder.maps.map((map) => {
+                  {project.maps.map((map) => {
                     const renameMap = () => onRename({ kind: "map", id: map._id, name: map.title });
                     return (
                       <SidebarMenuSubItem key={map._id}>
@@ -213,14 +230,14 @@ export function LibraryTree({
                       </SidebarMenuSubItem>
                     );
                   })}
-                  {folder.maps.length === 0 && (
+                  {project.maps.length === 0 && (
                     <li className="px-2 py-2 text-xs text-muted-foreground">No maps yet</li>
                   )}
                   <SidebarMenuSubItem>
                     <SidebarMenuButton
                       className="h-8 text-xs text-muted-foreground"
                       disabled={busy}
-                      onClick={() => onNewMap(folder._id)}
+                      onClick={() => onNewMap(project._id)}
                     >
                       <Plus />
                       <span>New map</span>

@@ -1,5 +1,5 @@
 import { useMutation } from "convex/react";
-import { FolderPlus, Plus, Search, ShieldCheck } from "lucide-react";
+import { FolderPlus as ProjectPlus, Plus, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -38,7 +38,7 @@ import {
 } from "../components/ui/sidebar";
 import { LibraryTree, type Library, type LibraryTarget } from "./LibraryTree";
 import { DeleteLibraryDialog } from "./DeleteLibraryDialog";
-import { useCollapsedFolders } from "./useCollapsedFolders";
+import { useCollapsedProjects } from "./useCollapsedProjects";
 
 type Props = {
   library?: Library;
@@ -49,7 +49,7 @@ type Props = {
 };
 
 export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }: Props) {
-  const { collapsed, setOpen } = useCollapsedFolders();
+  const { collapsed, setOpen } = useCollapsedProjects();
   const { setOpenMobile } = useSidebar();
   const [searchOpen, setSearchOpen] = useState(false);
   const [renaming, setRenaming] = useState<LibraryTarget | null>(null);
@@ -59,9 +59,9 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
   const working = useRef(false);
   const [saving, setSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
-  const createFolder = useMutation(api.library.createFolder);
+  const createProject = useMutation(api.library.createProject);
   const createMap = useMutation(api.library.createMap);
-  const renameFolder = useMutation(api.library.renameFolder);
+  const renameProject = useMutation(api.library.renameProject);
   const renameMap = useMutation(api.library.renameMap);
 
   useEffect(() => {
@@ -85,29 +85,29 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
     setRenameError(null);
     setRenaming(target);
   };
-  const newFolder = async () => {
+  const newProject = async () => {
     if (working.current) return;
     working.current = true;
     setBusy(true);
     try {
-      const id = await createFolder({ name: "Untitled folder" });
+      const id = await createProject({ name: "Untitled project" });
       setOpen(id, true);
-      startRename({ kind: "folder", id, name: "Untitled folder" });
+      startRename({ kind: "project", id, name: "Untitled project" });
     } catch {
-      onError("Couldn't create the folder");
+      onError("Couldn't create the project");
     } finally {
       working.current = false;
       setBusy(false);
     }
   };
-  const newMap = async (folderId?: Id<"folders">) => {
+  const newMap = async (projectId?: Id<"projects">) => {
     if (working.current) return;
     working.current = true;
     setBusy(true);
     try {
-      folderId ??= await createFolder({ name: "Untitled folder" });
-      const id = await createMap({ folderId });
-      setOpen(folderId, true);
+      projectId ??= await createProject({ name: "Untitled project" });
+      const id = await createMap({ projectId });
+      setOpen(projectId, true);
       openMap(id);
       startRename({ kind: "map", id, name: "Untitled map" });
     } catch {
@@ -117,8 +117,8 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
       setBusy(false);
     }
   };
-  const currentFolderId =
-    library?.find((folder) => folder.maps.some((map) => map._id === activeTopicId))?._id ??
+  const currentProjectId =
+    library?.find((project) => project.maps.some((map) => map._id === activeTopicId))?._id ??
     library?.[0]?._id;
 
   return (
@@ -143,7 +143,7 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
           <Button
             className="w-full justify-start"
             disabled={!library || busy}
-            onClick={() => void newMap(currentFolderId)}
+            onClick={() => void newMap(currentProjectId)}
           >
             <Plus />
             New map
@@ -151,21 +151,21 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
-            <SidebarGroupLabel>My library</SidebarGroupLabel>
+            <SidebarGroupLabel>Projects</SidebarGroupLabel>
             <SidebarGroupAction
-              title="New folder"
-              aria-label="New folder"
+              title="New project"
+              aria-label="New project"
               disabled={!library || busy}
-              onClick={() => void newFolder()}
+              onClick={() => void newProject()}
             >
-              <FolderPlus />
+              <ProjectPlus />
             </SidebarGroupAction>
             {library ? (
               <LibraryTree
                 library={library}
                 activeTopicId={activeTopicId}
                 collapsed={collapsed}
-                onFolderOpenChange={setOpen}
+                onProjectOpenChange={setOpen}
                 onOpenMap={openMap}
                 onNewMap={(id) => void newMap(id)}
                 onRename={startRename}
@@ -185,10 +185,6 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter className="p-3">
-          <div className="flex items-center gap-2 px-2 pb-2 text-xs text-muted-foreground">
-            <ShieldCheck className="size-3.5" />
-            Your library is private
-          </div>
           <SidebarSeparator className="mx-0 w-full" />
           <AccountMenu />
         </SidebarFooter>
@@ -209,12 +205,12 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
         <CommandInput placeholder="Search your maps..." aria-label="Search maps" />
         <CommandList>
           <CommandEmpty>No maps found.</CommandEmpty>
-          {library?.map((folder) => (
-            <CommandGroup heading={folder.name} key={folder._id}>
-              {folder.maps.map((map) => (
+          {library?.map((project) => (
+            <CommandGroup heading={project.name} key={project._id}>
+              {project.maps.map((map) => (
                 <CommandItem
                   key={map._id}
-                  value={`${folder.name} ${map.title} ${map._id}`}
+                  value={`${project.name} ${map.title} ${map._id}`}
                   onSelect={() => openMap(map._id)}
                 >
                   <Search className="text-muted-foreground" />
@@ -245,8 +241,8 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
               setSaving(true);
               setRenameError(null);
               try {
-                if (renaming.kind === "folder")
-                  await renameFolder({ folderId: renaming.id, name: name.trim() });
+                if (renaming.kind === "project")
+                  await renameProject({ projectId: renaming.id, name: name.trim() });
                 else await renameMap({ topicId: renaming.id, title: name.trim() });
                 setRenaming(null);
               } catch {
@@ -257,7 +253,7 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
             }}
           >
             <DialogHeader>
-              <DialogTitle>Rename {renaming?.kind === "folder" ? "folder" : "map"}</DialogTitle>
+              <DialogTitle>Rename {renaming?.kind === "project" ? "project" : "map"}</DialogTitle>
               <DialogDescription>Choose a name you can find again later.</DialogDescription>
             </DialogHeader>
             <div className="space-y-2">
