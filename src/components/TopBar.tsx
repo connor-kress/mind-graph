@@ -57,12 +57,17 @@ export function TopBar({
   notesOpen,
   onNotesToggle,
 }: Props) {
-  const { open, isMobile } = useSidebar();
+  const { open, openMobile, isMobile } = useSidebar();
+  const sidebarOpen = isMobile ? openMobile : open;
   return (
     <header className="shrink-0 border-b bg-background">
       <div className="flex h-14 min-w-0 items-center gap-3 px-3 md:px-5">
-        <SidebarTrigger title="Toggle sidebar (Ctrl+\\)" />
-        <Separator orientation="vertical" className="h-4!" />
+        {!sidebarOpen && (
+          <>
+            <SidebarTrigger title="Toggle sidebar (Ctrl+\\)" />
+            <Separator orientation="vertical" className="h-4!" />
+          </>
+        )}
         <Breadcrumb className="min-w-0 flex-1">
           <BreadcrumbList className="flex-nowrap text-xs">
             <BreadcrumbItem className="hidden sm:block">My library</BreadcrumbItem>
