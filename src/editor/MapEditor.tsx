@@ -17,6 +17,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { Id } from "../../convex/_generated/dataModel";
 import { BranchLine } from "./BranchLine";
 import { EditorContext, type EditorActions, type EditorContextValue } from "./EditorContext";
+import { useImageExport } from "./exportImage";
 import { ESTIMATED_SIZE, layoutTree } from "./layout";
 import { MindNode, type Caret, type MindFlowNode } from "./MindNode";
 import { menuItems, type MenuItem } from "./menu";
@@ -86,6 +87,7 @@ function Editor({ mapId, vim }: Props) {
   const { nodes, apply, undo, redo, saveError, dismissError } = useMapDoc(mapId);
   const flow = useReactFlow<MindFlowNode>();
   const wrapper = useRef<HTMLDivElement>(null);
+  useImageExport(wrapper);
   // Whether the latest pointerdown landed in the canvas.
   const pointerDownInCanvas = useRef(false);
   useEffect(() => {

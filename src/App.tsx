@@ -9,6 +9,7 @@ import { CompareView } from "./compare/CompareView";
 import { NotesPanel } from "./components/NotesPanel";
 import { RecallStart } from "./components/RecallStart";
 import { commitEdits } from "./editor/commitEdits";
+import { downloadMapImage, fileName } from "./editor/exportImage";
 import { TopBar } from "./components/TopBar";
 import { MapControls, type Mode } from "./components/MapControls";
 import { isTextInput } from "./editor/isTextInput";
@@ -345,6 +346,18 @@ export default function App() {
           onVimToggle={toggleVim}
           notesOpen={notesOpen}
           onNotesToggle={() => setNotesOpen((open) => !open)}
+          onExport={() => {
+            if (!workspace) return;
+            const name = fileName(workspace.topic.title);
+            setError(null);
+            downloadMapImage(mode === "compare" ? `${name}-compare` : name).catch((e) => {
+              console.error("Failed to export map", e);
+              setError("Couldn't export the map");
+            });
+          }}
+          exportDisabled={
+            mode === "recall" ? "Unavailable during recall" : main ? undefined : "No map to export"
+          }
         />
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="relative flex min-w-0 flex-1 flex-col bg-neutral-50">

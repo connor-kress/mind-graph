@@ -1,4 +1,4 @@
-import { BookOpen, Keyboard, MoreHorizontal } from "lucide-react";
+import { BookOpen, ImageDown, Keyboard, MoreHorizontal } from "lucide-react";
 import { AccountMenu } from "./AccountMenu";
 import {
   Breadcrumb,
@@ -12,6 +12,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -27,9 +28,21 @@ type Props = {
   onVimToggle: () => void;
   notesOpen: boolean;
   onNotesToggle: () => void;
+  onExport: () => void;
+  /** Why the map can't be exported right now, if it can't. */
+  exportDisabled?: string;
 };
 
-export function TopBar({ project, title, vim, onVimToggle, notesOpen, onNotesToggle }: Props) {
+export function TopBar({
+  project,
+  title,
+  vim,
+  onVimToggle,
+  notesOpen,
+  onNotesToggle,
+  onExport,
+  exportDisabled,
+}: Props) {
   const { open, openMobile, isMobile } = useSidebar();
   const sidebarOpen = isMobile ? openMobile : open;
   return (
@@ -105,6 +118,23 @@ export function TopBar({ project, title, vim, onVimToggle, notesOpen, onNotesTog
               <BookOpen />
               Source notes
             </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuItem
+                  aria-disabled={!!exportDisabled}
+                  onSelect={(event) => {
+                    if (exportDisabled) event.preventDefault();
+                    else onExport();
+                  }}
+                  className={exportDisabled ? "cursor-not-allowed opacity-40" : ""}
+                >
+                  <ImageDown />
+                  Export as PNG
+                </DropdownMenuItem>
+              </TooltipTrigger>
+              {exportDisabled && <TooltipContent side="left">{exportDisabled}</TooltipContent>}
+            </Tooltip>
           </DropdownMenuContent>
         </DropdownMenu>
         {(!open || isMobile) && <AccountMenu compact />}
