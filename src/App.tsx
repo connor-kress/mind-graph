@@ -9,7 +9,8 @@ import { CompareView } from "./compare/CompareView";
 import { NotesPanel } from "./components/NotesPanel";
 import { RecallStart } from "./components/RecallStart";
 import { commitEdits } from "./editor/commitEdits";
-import { TopBar, type Mode } from "./components/TopBar";
+import { TopBar } from "./components/TopBar";
+import { MapControls, type Mode } from "./components/MapControls";
 import { isTextInput } from "./editor/isTextInput";
 import { MapEditor } from "./editor/MapEditor";
 import { Sidebar } from "./sidebar/Sidebar";
@@ -341,14 +342,6 @@ export default function App() {
         <TopBar
           project={workspace?.projectName}
           title={workspace?.topic.title}
-          mode={mode}
-          onModeChange={(next) => {
-            setError(null);
-            setRequestedMode(next);
-          }}
-          disabled={disabled}
-          status={status}
-          actions={actions}
           vim={vim}
           onVimToggle={toggleVim}
           notesOpen={notesOpen}
@@ -357,6 +350,18 @@ export default function App() {
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="relative flex min-w-0 flex-1 flex-col bg-neutral-50">
             {main}
+            {workspace && (
+              <MapControls
+                mode={mode}
+                onModeChange={(next) => {
+                  setError(null);
+                  setRequestedMode(next);
+                }}
+                disabled={disabled}
+                status={status}
+                actions={actions}
+              />
+            )}
             {workspace === null && (
               <div className="flex flex-1 items-center justify-center p-6 text-center">
                 <div>
@@ -371,7 +376,7 @@ export default function App() {
               <div
                 role="alert"
                 // Below the editor's own save-error banner, so both stay readable.
-                className="absolute left-4 right-4 top-14 z-30 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center gap-3 rounded-lg border border-destructive/20 bg-background px-4 py-3 text-sm text-destructive shadow-lg"
+                className="absolute left-4 right-4 top-28 z-30 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center gap-3 rounded-lg border border-destructive/20 bg-background px-4 py-3 text-sm text-destructive shadow-lg"
               >
                 {error}
                 <Button
