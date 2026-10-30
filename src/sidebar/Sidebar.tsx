@@ -1,6 +1,6 @@
 import { useMutation } from "convex/react";
 import { FolderPlus as ProjectPlus, Plus, Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { AccountMenu } from "../components/AccountMenu";
@@ -40,6 +40,8 @@ import { LibraryTree, type Library, type LibraryTarget } from "./LibraryTree";
 import { CreateMapDialog } from "./CreateMapDialog";
 import { CreateProjectDialog } from "./CreateProjectDialog";
 import { DeleteLibraryDialog } from "./DeleteLibraryDialog";
+import { ImportMapDialog } from "./ImportMapDialog";
+import { readMapFile, type MapFileChoice } from "./readMapFile";
 import { useCollapsedProjects } from "./useCollapsedProjects";
 
 type Props = {
@@ -56,6 +58,15 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onDelete }: Props) 
   const [renaming, setRenaming] = useState<LibraryTarget | null>(null);
   const [creatingMap, setCreatingMap] = useState<{ projectId?: Id<"projects"> } | null>(null);
   const [deleting, setDeleting] = useState<LibraryTarget | null>(null);
+  // The project a map file is being chosen for, then the file once read.
+  const importInto = useRef<Id<"projects"> | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState<{
+    projectId: Id<"projects">;
+    choice: MapFileChoice;
+    /** Changes with each file chosen, so each starts with a fresh form. */
+    id: number;
+  } | null>(null);
   const [name, setName] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -74,6 +85,21 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onDelete }: Props) 
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // A map file dropped just beside a project would otherwise replace the app.
+  useEffect(() => {
+    const onDrag = (e: DragEvent) => {
+      if (e.defaultPrevented || !e.dataTransfer?.types.includes("Files")) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "none";
+    };
+    window.addEventListener("dragover", onDrag);
+    window.addEventListener("drop", onDrag);
+    return () => {
+      window.removeEventListener("dragover", onDrag);
+      window.removeEventListener("drop", onDrag);
+    };
+  }, []);
+
   const openMap = (id: Id<"topics">) => {
     onOpenMap(id);
     setOpenMobile(false);
@@ -85,6 +111,14 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onDelete }: Props) 
     setRenaming(target);
   };
   const newMap = (projectId?: Id<"projects">) => setCreatingMap({ projectId });
+  const importMapFile = async (projectId: Id<"projects">, file: File) => {
+    const choice = await readMapFile(file);
+    setImporting({ projectId, choice, id: Date.now() });
+  };
+  const chooseMapFile = (projectId: Id<"projects">) => {
+    importInto.current = projectId;
+    fileInput.current?.click();
+  };
   const currentProjectId =
     library?.find((project) => project.maps.some((map) => map._id === activeTopicId))?._id ??
     library?.[0]?._id;
@@ -136,6 +170,8 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onDelete }: Props) 
                 onProjectOpenChange={setOpen}
                 onOpenMap={openMap}
                 onNewMap={(id) => void newMap(id)}
+                onImportMap={chooseMapFile}
+                onDropMapFile={(id, file) => void importMapFile(id, file)}
                 onRename={startRename}
                 onDelete={setDeleting}
               />
@@ -169,6 +205,32 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onDelete }: Props) 
           onClose={() => setCreatingMap(null)}
           onCreated={(topicId) => {
             if (creatingMap.projectId) setOpen(creatingMap.projectId, true);
+            openMap(topicId);
+          }}
+        />
+      )}
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".json,application/json"
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          const projectId = importInto.current;
+          event.target.value = "";
+          if (file && projectId) void importMapFile(projectId, file);
+        }}
+      />
+      {importing && (
+        <ImportMapDialog
+          key={importing.id}
+          projectId={importing.projectId}
+          projectName={library?.find((project) => project._id === importing.projectId)?.name}
+          choice={importing.choice}
+          onChooseAgain={() => chooseMapFile(importing.projectId)}
+          onClose={() => setImporting(null)}
+          onImported={(topicId) => {
+            setOpen(importing.projectId, true);
             openMap(topicId);
           }}
         />

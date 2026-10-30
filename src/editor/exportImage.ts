@@ -1,6 +1,7 @@
 import { getNodesBounds, useReactFlow } from "@xyflow/react";
 import { toPng } from "html-to-image";
 import { useEffect, type RefObject } from "react";
+import type { MapFile } from "../../convex/mapFile";
 
 const PADDING = 40;
 const PIXEL_RATIO = 2;
@@ -55,9 +56,23 @@ export function useImageExport(container: RefObject<HTMLElement | null>) {
 export async function downloadMapImage(name: string) {
   const url = await capture?.();
   if (!url) throw new Error("There's no map to export yet");
+  saveFile(`${name}.png`, url);
+}
+
+/** Saves a map's contents as `<name>.json`, to be imported later. */
+export function downloadMapFile(name: string, file: MapFile) {
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(file, null, 2)], { type: "application/json" }),
+  );
+  saveFile(`${name}.json`, url);
+  // After the download has started.
+  setTimeout(() => URL.revokeObjectURL(url));
+}
+
+function saveFile(name: string, href: string) {
   const link = document.createElement("a");
-  link.download = `${name}.png`;
-  link.href = url;
+  link.download = name;
+  link.href = href;
   link.click();
 }
 
