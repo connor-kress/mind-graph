@@ -11,7 +11,7 @@ async function fixture() {
   const alice = t.withIdentity({ subject: "alice", issuer: "https://clerk.test" });
   const bob = t.withIdentity({ subject: "bob", issuer: "https://clerk.test" });
   const projectId = await alice.mutation(api.library.createProject, { name: "Alice's project" });
-  const topicId = await alice.mutation(api.library.createMap, { projectId });
+  const topicId = await alice.mutation(api.library.createMap, { projectId, title: "Untitled map" });
   const workspace = await alice.query(api.workspace.get, { topicId });
   const mapId = workspace!.referenceMapId!;
   const recallId = await alice.mutation(api.workspace.startRecall, { topicId });
@@ -28,7 +28,7 @@ describe("account ownership", () => {
       () => t.query(api.links.list, { mapId: recallId }),
       () => t.mutation(api.workspace.seed),
       () => t.mutation(api.library.createProject, { name: "No" }),
-      () => t.mutation(api.library.createMap, { projectId }),
+      () => t.mutation(api.library.createMap, { projectId, title: "Untitled map" }),
       () => t.mutation(api.library.renameProject, { projectId, name: "No" }),
       () => t.mutation(api.library.renameMap, { topicId, title: "No" }),
       () => t.mutation(api.library.deleteMap, { topicId }),
@@ -50,7 +50,7 @@ describe("account ownership", () => {
       () => bob.query(api.nodes.list, { mapId }),
       () => bob.query(api.nodes.list, { mapId: recallId }),
       () => bob.query(api.links.list, { mapId: recallId }),
-      () => bob.mutation(api.library.createMap, { projectId }),
+      () => bob.mutation(api.library.createMap, { projectId, title: "Untitled map" }),
       () => bob.mutation(api.library.renameProject, { projectId, name: "Stolen" }),
       () => bob.mutation(api.library.renameMap, { topicId, title: "Stolen" }),
       () => bob.mutation(api.library.deleteMap, { topicId }),
@@ -132,9 +132,15 @@ describe("library deletion", () => {
     const { t, alice, bob, projectId, topicId, mapId, recallId } = await fixture();
     await alice.mutation(api.workspace.finishRecall, { mapId: recallId });
     const activeRecall = await alice.mutation(api.workspace.startRecall, { topicId });
-    const sibling = await alice.mutation(api.library.createMap, { projectId });
+    const sibling = await alice.mutation(api.library.createMap, {
+      projectId,
+      title: "Untitled map",
+    });
     const otherProject = await bob.mutation(api.library.createProject, { name: "Bob's project" });
-    const otherTopic = await bob.mutation(api.library.createMap, { projectId: otherProject });
+    const otherTopic = await bob.mutation(api.library.createMap, {
+      projectId: otherProject,
+      title: "Untitled map",
+    });
     await alice.mutation(api.library.deleteMap, { topicId });
     await t.run(async (ctx) => {
       expect(await ctx.db.get(topicId)).toBeNull();
@@ -156,9 +162,15 @@ describe("library deletion", () => {
 
   test("project deletion requires the current exact name and cascades only through that project", async () => {
     const { t, alice, projectId, topicId } = await fixture();
-    const secondTopic = await alice.mutation(api.library.createMap, { projectId });
+    const secondTopic = await alice.mutation(api.library.createMap, {
+      projectId,
+      title: "Untitled map",
+    });
     const safeProject = await alice.mutation(api.library.createProject, { name: "Keep" });
-    const safeTopic = await alice.mutation(api.library.createMap, { projectId: safeProject });
+    const safeTopic = await alice.mutation(api.library.createMap, {
+      projectId: safeProject,
+      title: "Untitled map",
+    });
     for (const confirmation of ["", "alice's project", "Alice's project "]) {
       await expect(
         alice.mutation(api.library.deleteProject, { projectId, confirmation }),
@@ -188,7 +200,10 @@ describe("library deletion", () => {
     expect(await alice.query(api.library.list)).toEqual([]);
     expect(await alice.query(api.workspace.get, {})).toBeNull();
     const freshProject = await alice.mutation(api.library.createProject, { name: "Fresh" });
-    const freshTopic = await alice.mutation(api.library.createMap, { projectId: freshProject });
+    const freshTopic = await alice.mutation(api.library.createMap, {
+      projectId: freshProject,
+      title: "Untitled map",
+    });
     expect((await alice.query(api.workspace.get, {}))?.topic._id).toBe(freshTopic);
   });
 });
@@ -233,7 +248,10 @@ describe("project membership", () => {
     expect(
       (await alice.query(api.nodes.list, { mapId })).some((n) => n.key === "member-node"),
     ).toBe(true);
-    const memberMap = await bob.mutation(api.library.createMap, { projectId });
+    const memberMap = await bob.mutation(api.library.createMap, {
+      projectId,
+      title: "Untitled map",
+    });
     await bob.mutation(api.library.deleteMap, { topicId: memberMap });
     expect(await t.run((ctx) => ctx.db.get(memberMap))).toBeNull();
     await expect(
@@ -436,4 +454,29 @@ test("deleting a partially migrated project removes unlinked owned maps without 
   await alice.mutation(api.workspace.seed);
   expect(await alice.query(api.library.list)).toEqual([]);
   expect(await t.run((ctx) => ctx.db.get(topicId))).toBeNull();
+});
+
+test("map creation validates its name before creating data and uses it for the reference root", async () => {
+  const t = convexTest(schema, modules);
+  const alice = t.withIdentity({ subject: "alice" });
+  for (const title of ["", "   ", "x".repeat(201)]) {
+    await expect(alice.mutation(api.library.createMap, { title })).rejects.toThrow();
+    await t.run(async (ctx) => {
+      for (const table of ["projects", "projectMembers", "topics", "maps", "nodes"] as const) {
+        expect(await ctx.db.query(table).collect()).toEqual([]);
+      }
+    });
+  }
+  const topicId = await alice.mutation(api.library.createMap, { title: "  New concept  " });
+  const library = await alice.query(api.library.list);
+  expect(library).toHaveLength(1);
+  expect(library[0].maps).toEqual([{ _id: topicId, title: "New concept" }]);
+  const workspace = await alice.query(api.workspace.get, { topicId });
+  expect((await alice.query(api.nodes.list, { mapId: workspace!.referenceMapId! }))[0].label).toBe(
+    "New concept",
+  );
+  await alice.mutation(api.library.createMap, { projectId: library[0]._id, title: "Second map" });
+  const updated = await alice.query(api.library.list);
+  expect(updated).toHaveLength(1);
+  expect(updated[0].maps.map((map) => map.title)).toEqual(["New concept", "Second map"]);
 });

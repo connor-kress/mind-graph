@@ -8,8 +8,6 @@ import { insertProject, migrateTopic } from "./projectMigration";
 
 const MAX_NAME_LENGTH = 200;
 
-const UNTITLED_MAP = "Untitled map";
-
 /** Projects the caller belongs to, with their shared maps. */
 export const list = query({
   args: {},
@@ -48,12 +46,23 @@ export const createProject = mutation({
 });
 
 export const createMap = mutation({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, { projectId }) => {
-    await requireProject(ctx, projectId);
-    const topicId = await ctx.db.insert("topics", { projectId, title: UNTITLED_MAP });
+  args: { projectId: v.optional(v.id("projects")), title: v.string() },
+  handler: async (ctx, { projectId, title }) => {
+    const userId = await requireUser(ctx);
+    const name = cleanName(title);
+    if (projectId) await requireProject(ctx, projectId);
+    else {
+      const projects = await memberProjects(ctx, userId);
+      projectId = await insertProject(
+        ctx,
+        userId,
+        "Untitled project",
+        Math.max(-1, ...projects.map((p) => p.order)) + 1,
+      );
+    }
+    const topicId = await ctx.db.insert("topics", { projectId, title: name });
     const mapId = await ctx.db.insert("maps", { topicId, kind: "reference" });
-    await insertTree(ctx, mapId, { label: UNTITLED_MAP }, undefined, 0);
+    await insertTree(ctx, mapId, { label: name }, undefined, 0);
     return topicId;
   },
 });

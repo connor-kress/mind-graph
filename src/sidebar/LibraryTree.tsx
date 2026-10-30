@@ -83,10 +83,7 @@ export function LibraryTree({
                 <ContextMenu>
                   <ContextMenuTrigger asChild>
                     <CollapsibleTrigger asChild>
-                      <SidebarMenuButton
-                        onDoubleClick={canManage ? renameProject : undefined}
-                        className="h-9 pr-2! transition-none group-hover/project-row:pr-14! group-has-[:focus-visible]/project-row:pr-14! group-has-[[data-sidebar=menu-action][aria-expanded=true]]/project-row:pr-14! [@media(hover:none)]:pr-14!"
-                      >
+                      <SidebarMenuButton className="h-9 pr-2! transition-none group-hover/project-row:pr-14! group-has-[:focus-visible]/project-row:pr-14! group-has-[[data-sidebar=menu-action][aria-expanded=true]]/project-row:pr-14! [@media(hover:none)]:pr-14!">
                         <ChevronRight
                           className={`size-3.5 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
                         />
@@ -192,7 +189,6 @@ export function LibraryTree({
                               isActive={map._id === activeTopicId}
                               aria-current={map._id === activeTopicId ? "page" : undefined}
                               onClick={() => onOpenMap(map._id)}
-                              onDoubleClick={renameMap}
                             >
                               <FileText className="text-muted-foreground" />
                               <span>{map.title}</span>

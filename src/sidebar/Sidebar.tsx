@@ -37,6 +37,7 @@ import {
   useSidebar,
 } from "../components/ui/sidebar";
 import { LibraryTree, type Library, type LibraryTarget } from "./LibraryTree";
+import { CreateMapDialog } from "./CreateMapDialog";
 import { DeleteLibraryDialog } from "./DeleteLibraryDialog";
 import { useCollapsedProjects } from "./useCollapsedProjects";
 
@@ -53,6 +54,7 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
   const { setOpenMobile } = useSidebar();
   const [searchOpen, setSearchOpen] = useState(false);
   const [renaming, setRenaming] = useState<LibraryTarget | null>(null);
+  const [creatingMap, setCreatingMap] = useState<{ projectId?: Id<"projects"> } | null>(null);
   const [deleting, setDeleting] = useState<LibraryTarget | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -60,7 +62,6 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
   const [saving, setSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
   const createProject = useMutation(api.library.createProject);
-  const createMap = useMutation(api.library.createMap);
   const renameProject = useMutation(api.library.renameProject);
   const renameMap = useMutation(api.library.renameMap);
 
@@ -100,23 +101,7 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
       setBusy(false);
     }
   };
-  const newMap = async (projectId?: Id<"projects">) => {
-    if (working.current) return;
-    working.current = true;
-    setBusy(true);
-    try {
-      projectId ??= await createProject({ name: "Untitled project" });
-      const id = await createMap({ projectId });
-      setOpen(projectId, true);
-      openMap(id);
-      startRename({ kind: "map", id, name: "Untitled map" });
-    } catch {
-      onError("Couldn't create the map");
-    } finally {
-      working.current = false;
-      setBusy(false);
-    }
-  };
+  const newMap = (projectId?: Id<"projects">) => setCreatingMap({ projectId });
   const currentProjectId =
     library?.find((project) => project.maps.some((map) => map._id === activeTopicId))?._id ??
     library?.[0]?._id;
@@ -189,6 +174,17 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onError, onDelete }
           <AccountMenu />
         </SidebarFooter>
       </SidebarShell>
+      {creatingMap && (
+        <CreateMapDialog
+          projectId={creatingMap.projectId}
+          projectName={library?.find((project) => project._id === creatingMap.projectId)?.name}
+          onClose={() => setCreatingMap(null)}
+          onCreated={(topicId) => {
+            if (creatingMap.projectId) setOpen(creatingMap.projectId, true);
+            openMap(topicId);
+          }}
+        />
+      )}
       {deleting && (
         <DeleteLibraryDialog
           target={deleting}
