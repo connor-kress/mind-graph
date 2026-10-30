@@ -35,6 +35,8 @@ import {
   SidebarMenuSubItem,
 } from "../components/ui/sidebar";
 
+import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
+
 export type Library = FunctionReturnType<typeof api.library.list>;
 export type LibraryTarget =
   | { kind: "project"; id: Id<"projects">; name: string }
@@ -77,99 +79,116 @@ export function LibraryTree({
             asChild
           >
             <SidebarMenuItem>
-              <ContextMenu>
-                <ContextMenuTrigger asChild>
-                  <CollapsibleTrigger asChild>
-                    <SidebarMenuButton
-                      onDoubleClick={canManage ? renameProject : undefined}
-                      className="h-9 pr-8"
-                    >
-                      <ChevronRight
-                        className={`size-3.5 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
-                      />
-                      {open ? <ProjectOpen /> : <Project />}
-                      <span>{project.name}</span>
-                    </SidebarMenuButton>
-                  </CollapsibleTrigger>
-                </ContextMenuTrigger>
-                <ContextMenuContent
-                  className="w-44 whitespace-nowrap"
-                  onKeyDown={(e) => e.stopPropagation()}
-                >
-                  <ContextMenuItem disabled={busy} onSelect={() => onNewMap(project._id)}>
-                    <Plus />
-                    New map
-                  </ContextMenuItem>
-                  {canManage && (
-                    <>
-                      <ContextMenuItem onSelect={renameProject}>
-                        <Pencil />
-                        Rename project
-                      </ContextMenuItem>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem
-                        variant="destructive"
-                        onSelect={() =>
-                          onDelete({ kind: "project", id: project._id, name: project.name })
-                        }
+              <div className="group/project-row relative">
+                <ContextMenu>
+                  <ContextMenuTrigger asChild>
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuButton
+                        onDoubleClick={canManage ? renameProject : undefined}
+                        className="h-9 pr-2! transition-none group-hover/project-row:pr-14! group-has-[:focus-visible]/project-row:pr-14! group-has-[[data-sidebar=menu-action][aria-expanded=true]]/project-row:pr-14! [@media(hover:none)]:pr-14!"
                       >
-                        <Trash2 />
-                        Delete project
-                      </ContextMenuItem>
-                    </>
-                  )}
-                </ContextMenuContent>
-              </ContextMenu>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <SidebarMenuAction
-                    showOnHover
-                    aria-label={`Actions for ${project.name}`}
-                    className="top-2"
+                        <ChevronRight
+                          className={`size-3.5 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+                        />
+                        {open ? <ProjectOpen /> : <Project />}
+                        <span>{project.name}</span>
+                      </SidebarMenuButton>
+                    </CollapsibleTrigger>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent
+                    className="w-44 whitespace-nowrap"
+                    onKeyDown={(e) => e.stopPropagation()}
                   >
-                    <MoreHorizontal />
-                  </SidebarMenuAction>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  className="w-44 whitespace-nowrap"
-                  side="right"
-                  align="start"
-                  onKeyDown={(e) => e.stopPropagation()}
-                >
-                  <DropdownMenuItem disabled={busy} onSelect={() => onNewMap(project._id)}>
-                    <Plus />
-                    New map
-                  </DropdownMenuItem>
-                  {canManage && (
-                    <>
-                      <DropdownMenuItem onSelect={renameProject}>
-                        <Pencil />
-                        Rename project
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onSelect={() =>
-                          onDelete({ kind: "project", id: project._id, name: project.name })
-                        }
-                      >
-                        <Trash2 />
-                        Delete project
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    <ContextMenuItem disabled={busy} onSelect={() => onNewMap(project._id)}>
+                      <Plus />
+                      New map
+                    </ContextMenuItem>
+                    {canManage && (
+                      <>
+                        <ContextMenuItem onSelect={renameProject}>
+                          <Pencil />
+                          Rename project
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem
+                          variant="destructive"
+                          onSelect={() =>
+                            onDelete({ kind: "project", id: project._id, name: project.name })
+                          }
+                        >
+                          <Trash2 />
+                          Delete project
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <SidebarMenuAction
+                      type="button"
+                      showOnHover
+                      disabled={busy}
+                      aria-label={`Add map to ${project.name}`}
+                      onClick={() => onNewMap(project._id)}
+                      className="top-2! right-7 group-hover/project-row:opacity-100 group-has-[:focus-visible]/project-row:opacity-100"
+                    >
+                      <Plus />
+                    </SidebarMenuAction>
+                  </TooltipTrigger>
+                  <TooltipContent>Add map</TooltipContent>
+                </Tooltip>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <SidebarMenuAction
+                      showOnHover
+                      aria-label={`Actions for ${project.name}`}
+                      className="top-2! group-hover/project-row:opacity-100 group-has-[:focus-visible]/project-row:opacity-100"
+                    >
+                      <MoreHorizontal />
+                    </SidebarMenuAction>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    className="w-44 whitespace-nowrap"
+                    side="right"
+                    align="start"
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
+                    <DropdownMenuItem disabled={busy} onSelect={() => onNewMap(project._id)}>
+                      <Plus />
+                      New map
+                    </DropdownMenuItem>
+                    {canManage && (
+                      <>
+                        <DropdownMenuItem onSelect={renameProject}>
+                          <Pencil />
+                          Rename project
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() =>
+                            onDelete({ kind: "project", id: project._id, name: project.name })
+                          }
+                        >
+                          <Trash2 />
+                          Delete project
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
               <CollapsibleContent>
                 <SidebarMenuSub className="mr-0 pr-0">
                   {project.maps.map((map) => {
                     const renameMap = () => onRename({ kind: "map", id: map._id, name: map.title });
                     return (
-                      <SidebarMenuSubItem key={map._id}>
+                      <SidebarMenuSubItem key={map._id} className="group/map-row">
                         <ContextMenu>
                           <ContextMenuTrigger asChild>
                             <SidebarMenuButton
-                              className="h-8 pr-8 text-[13px]"
+                              className="h-8 pr-2! text-[13px] transition-none group-hover/map-row:pr-8! group-has-[:focus-visible]/map-row:pr-8! group-has-[[data-sidebar=menu-action][aria-expanded=true]]/map-row:pr-8! [@media(hover:none)]:pr-8!"
                               isActive={map._id === activeTopicId}
                               aria-current={map._id === activeTopicId ? "page" : undefined}
                               onClick={() => onOpenMap(map._id)}
@@ -201,7 +220,11 @@ export function LibraryTree({
                         </ContextMenu>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <SidebarMenuAction showOnHover aria-label={`Actions for ${map.title}`}>
+                            <SidebarMenuAction
+                              showOnHover
+                              aria-label={`Actions for ${map.title}`}
+                              className="group-hover/map-row:opacity-100 group-has-[:focus-visible]/map-row:opacity-100"
+                            >
                               <MoreHorizontal />
                             </SidebarMenuAction>
                           </DropdownMenuTrigger>
@@ -233,16 +256,6 @@ export function LibraryTree({
                   {project.maps.length === 0 && (
                     <li className="px-2 py-2 text-xs text-muted-foreground">No maps yet</li>
                   )}
-                  <SidebarMenuSubItem>
-                    <SidebarMenuButton
-                      className="h-8 text-xs text-muted-foreground"
-                      disabled={busy}
-                      onClick={() => onNewMap(project._id)}
-                    >
-                      <Plus />
-                      <span>New map</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuSubItem>
                 </SidebarMenuSub>
               </CollapsibleContent>
             </SidebarMenuItem>
