@@ -1,6 +1,6 @@
 import { internal } from "./_generated/api";
 import { internalMutation } from "./_generated/server";
-import { notesMarkdown } from "./seedData";
+import { notesSource } from "./seedData";
 
 /**
  * Moves topics' inline notes into Markdown sources in their project. Run once
@@ -14,8 +14,7 @@ export const notesToSources = internalMutation({
       if (!topic.notes || !topic.projectId) continue;
       await ctx.scheduler.runAfter(0, internal.sources.importText, {
         projectId: topic.projectId,
-        name: `${topic.notes.heading}.md`,
-        text: notesMarkdown(topic.notes),
+        ...notesSource(topic.notes),
       });
       await ctx.db.patch(topic._id, { notes: undefined });
     }

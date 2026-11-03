@@ -80,6 +80,31 @@ export const MAX_SOURCE_BYTES = 15 * 1024 * 1024;
 
 export const MAX_SOURCE_NAME_LENGTH = 255;
 
+/** Matches file names, so a title taken from an uploaded file's name always fits. */
+export const MAX_SOURCE_TITLE_LENGTH = MAX_SOURCE_NAME_LENGTH;
+
+/**
+ * A note's title from its file name, e.g. "Lecture_3 - cells.pdf" becomes
+ * "Lecture 3 - cells". Falls back to the name as written if that leaves nothing.
+ */
+export function titleFromFileName(name: string) {
+  const dot = name.lastIndexOf(".");
+  const stem = dot === -1 ? name : name.slice(0, dot);
+  return tidyTitle(stem.replaceAll("_", " ")) || tidyTitle(stem) || tidyTitle(name);
+}
+
+/** A title as it's kept: on one line, with runs of spaces collapsed. */
+export function tidyTitle(title: string) {
+  return title.replace(/\s+/g, " ").trim();
+}
+
+/** A tidy title cut to fit, without ending in a space or half a character such as an emoji. */
+export function fitTitle(title: string) {
+  let fitted = tidyTitle(title).slice(0, MAX_SOURCE_TITLE_LENGTH);
+  if (/[\uD800-\uDBFF]$/.test(fitted)) fitted = fitted.slice(0, -1);
+  return fitted.trimEnd();
+}
+
 /** The kind of a file, from its name, or undefined if it isn't supported. */
 export function kindOfFile(name: string): SourceKind | undefined {
   const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();

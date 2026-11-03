@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { AccountMenu } from "../components/AccountMenu";
+import { RenameDialog } from "../components/RenameDialog";
 import { Logo } from "../components/Logo";
 import { Button } from "../components/ui/button";
 import {
@@ -14,15 +15,6 @@ import {
   CommandItem,
   CommandList,
 } from "../components/ui/command";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../components/ui/dialog";
-import { Input } from "../components/ui/input";
 import {
   Sidebar as SidebarShell,
   SidebarContent,
@@ -67,10 +59,7 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onDelete }: Props) 
     /** Changes with each file chosen, so each starts with a fresh form. */
     id: number;
   } | null>(null);
-  const [name, setName] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [renameError, setRenameError] = useState<string | null>(null);
   const renameProject = useMutation(api.library.renameProject);
   const renameMap = useMutation(api.library.renameMap);
 
@@ -105,11 +94,7 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onDelete }: Props) 
     setOpenMobile(false);
     setSearchOpen(false);
   };
-  const startRename = (target: LibraryTarget) => {
-    setName(target.name);
-    setRenameError(null);
-    setRenaming(target);
-  };
+  const startRename = (target: LibraryTarget) => setRenaming(target);
   const newMap = (projectId?: Id<"projects">) => setCreatingMap({ projectId });
   const importMapFile = async (projectId: Id<"projects">, file: File) => {
     const choice = await readMapFile(file);
@@ -267,75 +252,24 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onDelete }: Props) 
           ))}
         </CommandList>
       </CommandDialog>
-      <Dialog
-        open={!!renaming}
-        onOpenChange={(open) => {
-          if (!open && !saving) setRenaming(null);
-        }}
-      >
-        <DialogContent
-          onOpenAutoFocus={(e) => {
-            e.preventDefault();
-            requestAnimationFrame(() => document.getElementById("library-name")?.focus());
+      {renaming && (
+        <RenameDialog
+          heading={`Rename ${renaming.kind}`}
+          description="Choose a name you can find again later."
+          label="Name"
+          saveLabel="Save name"
+          initialValue={renaming.name}
+          maxLength={200}
+          onSave={async (name) => {
+            if (renaming.kind === "project") await renameProject({ projectId: renaming.id, name });
+            else await renameMap({ topicId: renaming.id, title: name });
           }}
-        >
-          <form
-            className="space-y-5"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (!renaming || saving || !name.trim()) return;
-              setSaving(true);
-              setRenameError(null);
-              try {
-                if (renaming.kind === "project")
-                  await renameProject({ projectId: renaming.id, name: name.trim() });
-                else await renameMap({ topicId: renaming.id, title: name.trim() });
-                setRenaming(null);
-              } catch {
-                setRenameError("Couldn't save the name. Please try again.");
-              } finally {
-                setSaving(false);
-              }
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle>Rename {renaming?.kind === "project" ? "project" : "map"}</DialogTitle>
-              <DialogDescription>Choose a name you can find again later.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-2">
-              <label htmlFor="library-name" className="text-sm font-medium">
-                Name
-              </label>
-              <Input
-                id="library-name"
-                maxLength={200}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onFocus={(e) => e.target.select()}
-                disabled={saving}
-              />
-              {renameError && (
-                <p role="alert" className="text-sm text-destructive">
-                  {renameError}
-                </p>
-              )}
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={saving}
-                onClick={() => setRenaming(null)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={saving || !name.trim()}>
-                {saving ? "Saving..." : "Save name"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+          onClose={() => setRenaming(null)}
+          returnFocus={() =>
+            document.querySelector<HTMLElement>(`[data-library-actions="${renaming.id}"]`)
+          }
+        />
+      )}
     </>
   );
 }

@@ -176,6 +176,7 @@ export function LibraryTree({
                     <SidebarMenuAction
                       showOnHover
                       aria-label={`Actions for ${project.name}`}
+                      data-library-actions={project._id}
                       className="top-2! group-hover/project-row:opacity-100 group-has-[:focus-visible]/project-row:opacity-100"
                     >
                       <MoreHorizontal />
@@ -259,6 +260,7 @@ export function LibraryTree({
                             <SidebarMenuAction
                               showOnHover
                               aria-label={`Actions for ${map.title}`}
+                              data-library-actions={map._id}
                               className="group-hover/map-row:opacity-100 group-has-[:focus-visible]/map-row:opacity-100"
                             >
                               <MoreHorizontal />
