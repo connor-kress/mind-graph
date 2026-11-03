@@ -71,7 +71,8 @@ export function DeleteLibraryDialog({ target, onClose, onConfirm }: Props) {
                 </>
               ) : (
                 <>
-                  “{target.name}”, its notes, and all recall attempts will be permanently deleted.
+                  “{target.name}” and all its recall attempts will be permanently deleted. The
+                  project keeps its source notes.
                 </>
               )}{" "}
               This cannot be undone.

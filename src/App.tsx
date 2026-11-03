@@ -416,7 +416,7 @@ export default function App() {
             )}
           </div>
           <NotesPanel
-            topicId={workspace?.topic._id}
+            projectId={workspace === undefined ? undefined : (workspace?.topic.projectId ?? null)}
             hidden={mode === "recall"}
             open={notesOpen}
             onOpenChange={setNotesOpen}

@@ -3,44 +3,53 @@ import { internal } from "./_generated/api";
 import {
   internalAction,
   internalMutation,
-  internalQuery,
   mutation,
   query,
   type MutationCtx,
+  type QueryCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { projectMembership, requireTopic, requireUser } from "./auth";
-import { EXTRACTOR_VERSION, fileProblem, kindOfFile } from "./model";
+import { projectMembership, requireProject, requireUser } from "./auth";
+import { fileProblem, isNoteFile, kindOfFile } from "./model";
 
-/** A topic's sources, oldest first. */
+/** A source the current user can see, or null if it has been deleted. */
+async function requireSource(ctx: QueryCtx, sourceId: Id<"sources">) {
+  const source = await ctx.db.get(sourceId);
+  if (!source) return null;
+  await requireProject(ctx, source.projectId);
+  return source;
+}
+
+/** A project's sources, oldest first. */
 export const list = query({
-  args: { topicId: v.id("topics") },
-  handler: async (ctx, { topicId }) => {
-    await requireTopic(ctx, topicId);
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    await requireProject(ctx, projectId);
     const docs = await ctx.db
       .query("sources")
-      .withIndex("by_topic", (q) => q.eq("topicId", topicId))
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect();
     return docs.map(({ _id, name, kind, size, status }) => ({ _id, name, kind, size, status }));
   },
 });
 
-/** A source with links to its original file and its extracted content. */
+/** A source with links to its Markdown and, for transcribed files, the original. */
 export const open = query({
   args: { sourceId: v.id("sources") },
   handler: async (ctx, { sourceId }) => {
-    const source = await ctx.db.get(sourceId);
+    const source = await requireSource(ctx, sourceId);
     if (!source) return null;
-    await requireTopic(ctx, source.topicId);
-    const { _id, name, kind, status, storageId, contentId, pageCount } = source;
+    const { _id, name, kind, status, error, pageCount, storageId, markdownId } = source;
     return {
       _id,
       name,
       kind,
       status,
+      error,
       pageCount,
-      url: await ctx.storage.getUrl(storageId),
-      contentUrl: contentId ? await ctx.storage.getUrl(contentId) : null,
+      // A Markdown or text file is its own note, so it has no separate original.
+      originalUrl: isNoteFile(kind) ? null : await ctx.storage.getUrl(storageId),
+      markdownUrl: markdownId ? await ctx.storage.getUrl(markdownId) : null,
     };
   },
 });
@@ -55,23 +64,23 @@ export const generateUploadUrl = mutation({
 });
 
 /**
- * Adds an uploaded file to a topic. A file that can't be added is deleted, and
- * the reason returned (throwing would roll the deletion back).
+ * Adds an uploaded file to a project. A file that can't be added is deleted,
+ * and the reason returned (throwing would roll the deletion back).
  */
 export const add = mutation({
-  args: { topicId: v.id("topics"), storageId: v.id("_storage"), name: v.string() },
-  handler: async (ctx, { topicId, storageId, name }) => {
+  args: { projectId: v.id("projects"), storageId: v.id("_storage"), name: v.string() },
+  handler: async (ctx, { projectId, storageId, name }) => {
     const userId = await requireUser(ctx);
     const file = await ctx.db.system.get(storageId);
     if (!file) throw new ConvexError("The upload didn't finish");
-    const topic = await ctx.db.get(topicId);
-    const member = topic?.projectId && (await projectMembership(ctx, topic.projectId, userId));
-    const error = !member ? "Map not found" : fileProblem(name, file.size);
+    const member =
+      (await ctx.db.get(projectId)) && (await projectMembership(ctx, projectId, userId));
+    const error = !member ? "Project not found" : fileProblem(name, file.size);
     if (error) {
       await ctx.storage.delete(storageId);
       return { error };
     }
-    return { sourceId: await insertSource(ctx, topicId, storageId, name) };
+    return { sourceId: await insertSource(ctx, projectId, storageId, name) };
   },
 });
 
@@ -79,112 +88,79 @@ export const add = mutation({
 export const remove = mutation({
   args: { sourceId: v.id("sources") },
   handler: async (ctx, { sourceId }) => {
-    const source = await ctx.db.get(sourceId);
-    if (!source) return;
-    await requireTopic(ctx, source.topicId);
-    await deleteSource(ctx, source);
+    const source = await requireSource(ctx, sourceId);
+    if (source) await deleteSource(ctx, source);
   },
 });
 
-/** Reads a source's file again, e.g. after extraction failed. */
+/** Queues a source to be transcribed again after it failed. */
 export const retry = mutation({
   args: { sourceId: v.id("sources") },
   handler: async (ctx, { sourceId }) => {
-    const source = await ctx.db.get(sourceId);
-    if (!source) return;
-    await requireTopic(ctx, source.topicId);
-    if (source.status === "processing") return;
-    await ctx.db.patch(sourceId, { status: "processing" });
-    await ctx.scheduler.runAfter(0, internal.extract.run, { sourceId });
+    const source = await requireSource(ctx, sourceId);
+    if (source?.status !== "failed") return;
+    await ctx.db.patch(sourceId, { status: "queued", error: undefined });
   },
 });
 
-/** Adds text as a source, e.g. the demo notes. */
+/** Adds text as a Markdown source, e.g. the demo notes. */
 export const importText = internalAction({
-  args: { topicId: v.id("topics"), name: v.string(), text: v.string() },
-  handler: async (ctx, { topicId, name, text }) => {
+  args: { projectId: v.id("projects"), name: v.string(), text: v.string() },
+  handler: async (ctx, { projectId, name, text }) => {
     const storageId = await ctx.storage.store(new Blob([text], { type: "text/markdown" }));
-    await ctx.runMutation(internal.sources.attach, { topicId, storageId, name });
+    try {
+      await ctx.runMutation(internal.sources.attach, { projectId, storageId, name });
+    } catch (error) {
+      await ctx.storage.delete(storageId);
+      throw error;
+    }
   },
 });
 
 export const attach = internalMutation({
-  args: { topicId: v.id("topics"), storageId: v.id("_storage"), name: v.string() },
-  handler: (ctx, { topicId, storageId, name }) => insertSource(ctx, topicId, storageId, name),
-});
-
-/** What extraction needs to know about a source. */
-export const forExtraction = internalQuery({
-  args: { sourceId: v.id("sources") },
-  handler: async (ctx, { sourceId }) => {
-    const source = await ctx.db.get(sourceId);
-    return source && { storageId: source.storageId, kind: source.kind };
-  },
-});
-
-/** Records the result of extraction. */
-export const finish = internalMutation({
-  args: {
-    sourceId: v.id("sources"),
-    failed: v.boolean(),
-    contentId: v.optional(v.id("_storage")),
-    pageCount: v.optional(v.number()),
-  },
-  handler: async (ctx, { sourceId, failed, contentId, pageCount }) => {
-    const source = await ctx.db.get(sourceId);
-    // Deleted while it was being read.
-    if (!source) {
-      if (contentId) await ctx.storage.delete(contentId);
+  args: { projectId: v.id("projects"), storageId: v.id("_storage"), name: v.string() },
+  handler: async (ctx, { projectId, storageId, name }) => {
+    // Deleted before the text was stored.
+    if (!(await ctx.db.get(projectId))) {
+      await ctx.storage.delete(storageId);
       return;
     }
-    if (failed) {
-      await ctx.db.patch(sourceId, { status: "failed" });
-      return;
-    }
-    if (source.contentId && source.contentId !== contentId) {
-      await ctx.storage.delete(source.contentId);
-    }
-    await ctx.db.patch(sourceId, {
-      status: "ready",
-      contentId,
-      pageCount,
-      extractorVersion: EXTRACTOR_VERSION,
-    });
+    await insertSource(ctx, projectId, storageId, name);
   },
 });
 
 async function insertSource(
   ctx: MutationCtx,
-  topicId: Id<"topics">,
+  projectId: Id<"projects">,
   storageId: Id<"_storage">,
   name: string,
 ) {
   const file = await ctx.db.system.get(storageId);
   const kind = kindOfFile(name);
   if (!file || !kind) throw new ConvexError("Unsupported file");
-  const sourceId = await ctx.db.insert("sources", {
-    topicId,
+  const note = isNoteFile(kind);
+  return ctx.db.insert("sources", {
+    projectId,
     storageId,
     name,
     kind,
     size: file.size,
-    status: "processing",
+    status: note ? "ready" : "queued",
+    markdownId: note ? storageId : undefined,
   });
-  await ctx.scheduler.runAfter(0, internal.extract.run, { sourceId });
-  return sourceId;
 }
 
-/** Deletes a topic's sources and their files. */
-export async function deleteSources(ctx: MutationCtx, topicId: Id<"topics">) {
+/** Deletes a project's sources and their files. */
+export async function deleteProjectSources(ctx: MutationCtx, projectId: Id<"projects">) {
   const sources = await ctx.db
     .query("sources")
-    .withIndex("by_topic", (q) => q.eq("topicId", topicId))
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
     .collect();
   for (const source of sources) await deleteSource(ctx, source);
 }
 
 async function deleteSource(ctx: MutationCtx, source: Doc<"sources">) {
-  await ctx.storage.delete(source.storageId);
-  if (source.contentId) await ctx.storage.delete(source.contentId);
+  const files = new Set([source.storageId, source.markdownId]);
+  for (const id of files) if (id) await ctx.storage.delete(id);
   await ctx.db.delete(source._id);
 }

@@ -27,19 +27,34 @@ function clampWidth(width: number) {
 }
 
 type Props = {
-  topicId?: Id<"topics">;
+  /** Undefined while the map loads, and null when no map is open. */
+  projectId: Id<"projects"> | null | undefined;
   hidden: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 };
 
-/** The map's source files: drop or upload them, then open one to read it. */
-export function NotesPanel({ topicId, hidden, open, onOpenChange }: Props) {
+/** The project's source files: drop or upload them, then open one to read it. */
+export function NotesPanel({ projectId, hidden, open, onOpenChange }: Props) {
   const mobile = useIsMobile();
   const [openId, setOpenId] = useState<Id<"sources"> | null>(null);
-  const [errors, setErrors] = useState<string[]>([]);
-  const onError = (message: string) => setErrors((list) => [...list, message]);
-  const { pending, upload } = useUpload(topicId, onError);
+  // Each with the project it came from: uploads and deletions can fail after
+  // the user has moved on to another project.
+  const [errors, setErrors] = useState<{ projectId: Id<"projects">; message: string }[]>([]);
+
+  // The project whose notes are shown. Maps in a project share notes, so they
+  // stay shown while the next map loads; another project's aren't in its list.
+  const [shownId, setShownId] = useState(projectId);
+  if (projectId !== undefined && projectId !== shownId) {
+    setShownId(projectId);
+    setOpenId(null);
+    setErrors([]);
+  }
+  const onErrorIn = (projectId: Id<"projects">, message: string) =>
+    setErrors((list) => [...list, { projectId, message }]);
+  const shownErrors = errors.filter((error) => error.projectId === shownId);
+  // Files go to the open map's project, so none are added while the next map loads.
+  const { pending, upload } = useUpload(projectId ?? undefined, onErrorIn);
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   // Entering a child element fires dragenter before the parent's dragleave.
@@ -56,14 +71,6 @@ export function NotesPanel({ topicId, hidden, open, onOpenChange }: Props) {
   }, []);
   const resizeFrom = useRef<{ x: number; width: number } | null>(null);
 
-  // Another map's file isn't in this one's list.
-  const [prevTopicId, setPrevTopicId] = useState(topicId);
-  if (topicId !== prevTopicId) {
-    setPrevTopicId(topicId);
-    setOpenId(null);
-    setErrors([]);
-  }
-
   // A file dropped just outside the panel would otherwise replace the app.
   useEffect(() => {
     if (!accepting) return;
@@ -79,7 +86,7 @@ export function NotesPanel({ topicId, hidden, open, onOpenChange }: Props) {
   }, [accepting]);
 
   const addFiles = (files: FileList | null) => {
-    if (!files?.length) return;
+    if (!files?.length || !projectId) return;
     setErrors([]);
     setOpenId(null);
     upload(files);
@@ -97,7 +104,8 @@ export function NotesPanel({ topicId, hidden, open, onOpenChange }: Props) {
         onDragOver: (e: DragEvent) => {
           if (!hasFiles(e)) return;
           e.preventDefault();
-          e.dataTransfer.dropEffect = "copy";
+          // Nothing can be added while the next map loads.
+          e.dataTransfer.dropEffect = projectId ? "copy" : "none";
         },
         onDragLeave: (e: DragEvent) => {
           if (!hasFiles(e)) return;
@@ -115,7 +123,12 @@ export function NotesPanel({ topicId, hidden, open, onOpenChange }: Props) {
 
   const uploadButton = !hidden && (
     <>
-      <Button variant="ghost" size="xs" disabled={!topicId} onClick={() => input.current?.click()}>
+      <Button
+        variant="ghost"
+        size="xs"
+        disabled={!projectId}
+        onClick={() => input.current?.click()}
+      >
         <Upload data-icon="inline-start" />
         Upload
       </Button>
@@ -144,13 +157,13 @@ export function NotesPanel({ topicId, hidden, open, onOpenChange }: Props) {
         <SourceReader sourceId={openId} onClose={() => setOpenId(null)} />
       ) : (
         <>
-          {errors.length > 0 && (
+          {shownErrors.length > 0 && (
             <div
               role="alert"
               className="mx-2 mt-2 flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"
             >
               <ul className="min-w-0 flex-1 space-y-1">
-                {errors.map((message, i) => (
+                {shownErrors.map(({ message }, i) => (
                   <li key={i}>{message}</li>
                 ))}
               </ul>
@@ -164,10 +177,21 @@ export function NotesPanel({ topicId, hidden, open, onOpenChange }: Props) {
               </Button>
             </div>
           )}
-          <SourceList topicId={topicId} pending={pending} onOpen={setOpenId} onError={onError} />
+          {shownId === null ? (
+            <p className="px-7 py-10 text-center text-sm leading-6 text-muted-foreground">
+              Open a map to see its project's notes.
+            </p>
+          ) : (
+            <SourceList
+              projectId={shownId}
+              pending={pending.filter((upload) => upload.projectId === shownId)}
+              onOpen={setOpenId}
+              onError={(message) => shownId && onErrorIn(shownId, message)}
+            />
+          )}
         </>
       )}
-      {dragging && (
+      {dragging && projectId && (
         <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-primary bg-background/90 text-sm font-medium text-foreground">
           Drop files to add them
         </div>
@@ -187,7 +211,7 @@ export function NotesPanel({ topicId, hidden, open, onOpenChange }: Props) {
           <SheetHeader className="flex-row items-center gap-2 border-b p-5 pr-12">
             <SheetTitle className="flex-1 text-sm">Source notes</SheetTitle>
             <SheetDescription className="sr-only">
-              Reference material for the current map.
+              Reference material for the current project.
             </SheetDescription>
             {uploadButton}
           </SheetHeader>

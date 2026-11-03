@@ -60,6 +60,22 @@ export const sourceKind = v.union(
   v.literal("pptx"),
 );
 
+/**
+ * Where a source is in becoming a Markdown note. Markdown and text files are
+ * ready immediately; other files wait for the document runner to transcribe them.
+ */
+export const sourceStatus = v.union(
+  v.literal("queued"),
+  v.literal("processing"),
+  v.literal("ready"),
+  v.literal("failed"),
+);
+
+/** Files that are already notes, so they need no transcription. */
+export function isNoteFile(kind: SourceKind) {
+  return kind === "md" || kind === "txt";
+}
+
 export const MAX_SOURCE_BYTES = 15 * 1024 * 1024;
 
 export const MAX_SOURCE_NAME_LENGTH = 255;
@@ -79,35 +95,3 @@ export function fileProblem(name: string, size: number) {
   if (name.length > MAX_SOURCE_NAME_LENGTH) return "That file name is too long";
   return null;
 }
-
-export type ListItem = { text: string; items?: ListItem[] };
-
-/** Nests list entries under the latest entry with a lower `level`, e.g. an indent. */
-export function nestItems(entries: { text: string; level: number }[]): ListItem[] {
-  const root: ListItem[] = [];
-  const open: { level: number; item: ListItem }[] = [];
-  for (const { text, level } of entries) {
-    const item: ListItem = { text };
-    while (open.length && open[open.length - 1].level >= level) open.pop();
-    const parent = open[open.length - 1]?.item;
-    if (parent) (parent.items ??= []).push(item);
-    else root.push(item);
-    open.push({ level, item });
-  }
-  return root;
-}
-
-/**
- * A source's text with its structure, as extracted from the file. Stored as a
- * JSON file rather than in the database, since it can exceed document limits.
- * `page` is the PDF page or slide it starts on.
- */
-export type Block = (
-  | { type: "heading"; level: number; text: string }
-  | { type: "paragraph"; text: string }
-  | { type: "list"; ordered: boolean; items: ListItem[] }
-  | { type: "table"; rows: string[][] }
-) & { page?: number };
-
-/** Bumped when extraction improves, so older sources can be read again. */
-export const EXTRACTOR_VERSION = 2;
