@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "convex/react";
 import { BookOpen, RotateCw, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { kindOfFile } from "../../convex/model";
 import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
@@ -10,10 +10,16 @@ import { FileIcon } from "./FileIcon";
 import type { PendingUpload } from "./useUpload";
 
 type Props = {
-  topicId?: Id<"topics">;
+  projectId?: Id<"projects">;
   pending: PendingUpload[];
   onOpen: (sourceId: Id<"sources">) => void;
   onError: (message: string) => void;
+};
+
+const STATUS_TEXT: Partial<Record<Doc<"sources">["status"], string>> = {
+  queued: "Waiting to transcribe…",
+  processing: "Transcribing…",
+  failed: "Couldn't transcribe this file",
 };
 
 function formatSize(bytes: number) {
@@ -22,9 +28,9 @@ function formatSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** A topic's source files, plus the ones still uploading. */
-export function SourceList({ topicId, pending, onOpen, onError }: Props) {
-  const sources = useQuery(api.sources.list, topicId ? { topicId } : "skip");
+/** A project's source files, plus the ones still uploading. */
+export function SourceList({ projectId, pending, onOpen, onError }: Props) {
+  const sources = useQuery(api.sources.list, projectId ? { projectId } : "skip");
   const remove = useMutation(api.sources.remove);
   const retry = useMutation(api.sources.retry);
 
@@ -67,11 +73,7 @@ export function SourceList({ topicId, pending, onOpen, onError }: Props) {
                 <span
                   className={`block text-xs ${source.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}
                 >
-                  {source.status === "processing"
-                    ? "Reading…"
-                    : source.status === "failed"
-                      ? "Couldn't read this file"
-                      : formatSize(source.size)}
+                  {STATUS_TEXT[source.status] ?? formatSize(source.size)}
                 </span>
               </span>
             </button>
@@ -79,7 +81,7 @@ export function SourceList({ topicId, pending, onOpen, onError }: Props) {
               <Button
                 variant="ghost"
                 size="icon-xs"
-                aria-label={`Read ${source.name} again`}
+                aria-label={`Transcribe ${source.name} again`}
                 title="Try again"
                 onClick={() =>
                   retry({ sourceId: source._id }).catch(() => onError("Couldn't try again"))
@@ -95,7 +97,11 @@ export function SourceList({ topicId, pending, onOpen, onError }: Props) {
               title="Delete"
               className="mr-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
               onClick={() => {
-                if (!confirm(`Delete ${source.name}? It will be removed from this map's notes.`)) {
+                if (
+                  !confirm(
+                    `Delete ${source.name}? It will be removed from the notes of every map in this project.`,
+                  )
+                ) {
                   return;
                 }
                 remove({ sourceId: source._id }).catch(() =>

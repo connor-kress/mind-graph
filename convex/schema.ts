@@ -1,6 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { linkValidator, mapKind, nodeFields, sourceKind } from "./model";
+import { linkValidator, mapKind, nodeFields, sourceKind, sourceStatus } from "./model";
 
 export default defineSchema({
   // Remember initialization even after the user deletes their whole library.
@@ -31,8 +31,8 @@ export default defineSchema({
     order: v.number(),
   }).index("by_owner", ["ownerId"]),
 
-  // A study topic (shown as a map in the library): its source notes, one
-  // reference map, and recall attempts.
+  // A study topic (shown as a map in the library): one reference map and recall
+  // attempts. Its project holds the source notes.
   topics: defineTable({
     // Optional during migration. Only project-linked topics are accessible.
     projectId: v.optional(v.id("projects")),
@@ -57,21 +57,22 @@ export default defineSchema({
     .index("by_folder", ["folderId"])
     .index("by_owner", ["ownerId"]),
 
-  // A file in a topic's source notes. The bytes live in file storage.
+  // A project's source note, shared by all its maps. The bytes live in file storage.
   sources: defineTable({
-    topicId: v.id("topics"),
+    projectId: v.id("projects"),
+    /** The uploaded file. For Markdown and text, this is also the note itself. */
     storageId: v.id("_storage"),
     name: v.string(),
     kind: sourceKind,
     size: v.number(),
-    /** Whether its text has been extracted. */
-    status: v.union(v.literal("processing"), v.literal("ready"), v.literal("failed")),
-    /** Extracted blocks as JSON (see `Block`). */
-    contentId: v.optional(v.id("_storage")),
+    status: sourceStatus,
+    /** The note as Markdown, once it has been transcribed. */
+    markdownId: v.optional(v.id("_storage")),
+    /** Why transcription failed. */
+    error: v.optional(v.string()),
     /** Pages in a PDF, or slides in a presentation. */
     pageCount: v.optional(v.number()),
-    extractorVersion: v.optional(v.number()),
-  }).index("by_topic", ["topicId"]),
+  }).index("by_project", ["projectId"]),
 
   maps: defineTable({
     topicId: v.id("topics"),

@@ -258,3 +258,86 @@ body {
     transition: none;
   }
 }
+
+/* ---- Source notes ---- */
+
+/* Sizes are in em, so they follow the reader's chosen text size. */
+.note-markdown {
+  @apply leading-[2] text-muted-foreground;
+}
+
+.note-markdown > * + * {
+  margin-top: 1.15em;
+}
+
+.note-markdown :is(h1, h2, h3, h4, h5, h6) {
+  @apply pt-1 leading-[1.7] font-semibold text-foreground;
+}
+
+.note-markdown h1 {
+  font-size: 1.3em;
+}
+
+.note-markdown h2 {
+  font-size: 1.15em;
+}
+
+.note-markdown :is(ul, ol) {
+  @apply space-y-1 pl-5;
+}
+
+.note-markdown ul {
+  @apply list-disc;
+}
+
+.note-markdown ol {
+  @apply list-decimal;
+}
+
+.note-markdown :is(li > ul, li > ol) {
+  margin-top: 0.25em;
+}
+
+.note-markdown a {
+  @apply text-foreground underline underline-offset-4;
+}
+
+.note-markdown strong {
+  @apply font-semibold text-foreground;
+}
+
+.note-markdown code {
+  @apply rounded bg-muted px-1 py-0.5 font-mono text-[0.85em];
+}
+
+.note-markdown pre {
+  @apply overflow-x-auto rounded-lg bg-muted p-3 leading-[1.6];
+}
+
+.note-markdown pre code {
+  @apply bg-transparent p-0;
+}
+
+.note-markdown blockquote {
+  @apply border-l-2 pl-4;
+}
+
+.note-markdown hr {
+  @apply border-border;
+}
+
+.note-markdown table {
+  @apply text-[0.85em];
+}
+
+.note-markdown :is(th, td) {
+  @apply border px-2 py-1 text-left align-top;
+}
+
+.note-markdown th {
+  @apply font-semibold text-foreground;
+}
+
+.note-markdown .katex-display {
+  @apply overflow-x-auto overflow-y-hidden py-1;
+}

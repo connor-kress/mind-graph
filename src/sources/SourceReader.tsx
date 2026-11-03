@@ -1,15 +1,15 @@
 import { useMutation, useQuery } from "convex/react";
-import { AArrowDown, AArrowUp, ChevronLeft, ExternalLink } from "lucide-react";
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { ChevronLeft, ExternalLink, Minus, Plus } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import type { Block, ListItem } from "../../convex/model";
 import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
+import { Markdown } from "./Markdown";
 
 type Props = { sourceId: Id<"sources">; onClose: () => void };
 
-type Content = { url: string; blocks?: Block[]; failed?: boolean };
+type Content = { url: string; text?: string; failed?: boolean };
 
 const TEXT_SIZE_STORAGE_KEY = "mind-graph:source-text-size";
 /** Reading sizes in pixels; 14 matches the rest of the panel. */
@@ -31,19 +31,20 @@ function useTextSize() {
   };
 }
 
-/** The extracted blocks at a URL. Content files never change, so each is fetched once. */
+/** The note's text at a URL. Stored files never change, so each is fetched once, unless it failed. */
 function useContent(url: string | null) {
   const [content, setContent] = useState<Content | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!url) return;
     let cancelled = false;
     fetch(url)
       .then((response) => {
         if (!response.ok) throw new Error(`Status ${response.status}`);
-        return response.json() as Promise<Block[]>;
+        return response.text();
       })
       .then(
-        (blocks) => !cancelled && setContent({ url, blocks }),
+        (text) => !cancelled && setContent({ url, text }),
         (error) => {
           console.error(error);
           if (!cancelled) setContent({ url, failed: true });
@@ -52,15 +53,20 @@ function useContent(url: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [url]);
-  return content?.url === url ? content : null;
+  }, [url, attempt]);
+  const reload = () => {
+    setContent(null);
+    setAttempt((n) => n + 1);
+  };
+  return { content: content?.url === url ? content : null, reload };
 }
 
-/** A source's text with its headings, and a link to the original file. */
+/** A source's note, and a link to the original file it was transcribed from. */
 export function SourceReader({ sourceId, onClose }: Props) {
   const source = useQuery(api.sources.open, { sourceId });
   const retry = useMutation(api.sources.retry);
-  const content = useContent(source?.contentUrl ?? null);
+  const [retryFailed, setRetryFailed] = useState(false);
+  const { content, reload } = useContent(source?.markdownUrl ?? null);
   const text = useTextSize();
 
   // Deleted, here or elsewhere.
@@ -70,63 +76,59 @@ export function SourceReader({ sourceId, onClose }: Props) {
 
   let body;
   if (!source) body = null;
-  else if (source.status === "processing") body = <Message>Reading the file…</Message>;
+  else if (source.status === "queued") body = <Message>Waiting to be transcribed…</Message>;
+  else if (source.status === "processing") body = <Message>Transcribing…</Message>;
   else if (source.status === "failed") {
     body = (
       <Message>
-        Couldn't read this file.{" "}
+        {source.error ?? "Couldn't transcribe this file."}{" "}
         <button
           type="button"
           className="font-medium text-foreground underline underline-offset-4"
-          onClick={() => retry({ sourceId }).catch(console.error)}
+          onClick={() => {
+            setRetryFailed(false);
+            retry({ sourceId }).catch((error) => {
+              console.error(error);
+              setRetryFailed(true);
+            });
+          }}
+        >
+          Try again
+        </button>
+        {retryFailed && (
+          <span role="alert" className="mt-2 block text-destructive">
+            Couldn't try again. Check your connection.
+          </span>
+        )}
+      </Message>
+    );
+  } else if (!source.markdownUrl) {
+    body = <Message>Couldn't load the note.</Message>;
+  } else if (!content) body = null;
+  else if (content.text === undefined) {
+    body = (
+      <Message>
+        Couldn't load the note.{" "}
+        <button
+          type="button"
+          className="font-medium text-foreground underline underline-offset-4"
+          onClick={reload}
         >
           Try again
         </button>
       </Message>
     );
-  } else if (!source.contentUrl) {
-    // Added before files of its kind could be read.
-    body = (
-      <Message>
-        This file hasn't been read yet.{" "}
-        <button
-          type="button"
-          className="font-medium text-foreground underline underline-offset-4"
-          onClick={() => retry({ sourceId }).catch(console.error)}
-        >
-          Read it now
-        </button>
-      </Message>
-    );
-  } else if (!content) body = null;
-  else if (!content.blocks) body = <Message>Couldn't load the text.</Message>;
-  else if (!content.blocks.length) {
-    body = (
-      <Message>
-        {source.kind === "pdf"
-          ? "This PDF has no text to show. It may be a scan; open the original to read it."
-          : "No text found in this file."}
-      </Message>
-    );
-  } else {
-    const unit = source.kind === "pptx" ? "Slide" : "Page";
+  } else if (!content.text.trim()) body = <Message>This note is empty.</Message>;
+  else {
     body = (
       <ScrollArea className="min-h-0 flex-1">
-        {/* Sizes inside are in em, so they follow the chosen text size. */}
-        <div
-          className="space-y-[1.15em] p-5 leading-[2] text-muted-foreground"
-          style={{ fontSize: text.size }}
-        >
-          {content.blocks.map((block, i) => (
-            <Fragment key={i}>
-              {block.page && block.page !== content.blocks?.[i - 1]?.page && (
-                <PageLabel>
-                  {unit} {block.page}
-                </PageLabel>
-              )}
-              <BlockView block={block} />
-            </Fragment>
-          ))}
+        <div className="p-5" style={{ fontSize: text.size }}>
+          {source.kind === "txt" ? (
+            // Plain text isn't Markdown, so show it as written.
+            <p className="leading-[2] whitespace-pre-wrap text-muted-foreground">{content.text}</p>
+          ) : (
+            <Markdown>{content.text}</Markdown>
+          )}
         </div>
       </ScrollArea>
     );
@@ -149,7 +151,7 @@ export function SourceReader({ sourceId, onClose }: Props) {
           disabled={!text.smaller}
           onClick={text.smaller}
         >
-          <AArrowDown />
+          <Minus />
         </Button>
         <Button
           variant="ghost"
@@ -159,11 +161,11 @@ export function SourceReader({ sourceId, onClose }: Props) {
           disabled={!text.larger}
           onClick={text.larger}
         >
-          <AArrowUp />
+          <Plus />
         </Button>
-        {source?.url && (
+        {source?.originalUrl && (
           <Button variant="ghost" size="xs" asChild>
-            <a href={source.url} target="_blank" rel="noreferrer">
+            <a href={source.originalUrl} target="_blank" rel="noreferrer">
               Open original
               <ExternalLink data-icon="inline-end" />
             </a>
@@ -178,70 +180,5 @@ export function SourceReader({ sourceId, onClose }: Props) {
 function Message({ children }: { children: ReactNode }) {
   return (
     <p className="px-7 py-10 text-center text-sm leading-6 text-muted-foreground">{children}</p>
-  );
-}
-
-function PageLabel({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 pt-2 text-[0.8em] font-medium uppercase tracking-wide text-muted-foreground/70 first:pt-0">
-      {children}
-      <span className="h-px flex-1 bg-border" />
-    </div>
-  );
-}
-
-function BlockView({ block }: { block: Block }) {
-  switch (block.type) {
-    case "heading": {
-      // Below the panel's h2 and the file name's h3.
-      const Tag = `h${Math.min(block.level + 3, 6)}` as "h4";
-      return (
-        <Tag
-          className={`pt-1 font-semibold leading-[1.7] text-foreground ${block.level === 1 ? "text-[1.15em]" : ""}`}
-        >
-          {block.text}
-        </Tag>
-      );
-    }
-    case "paragraph":
-      return <p className="whitespace-pre-line">{block.text}</p>;
-    case "list":
-      return <List ordered={block.ordered} items={block.items} />;
-    case "table":
-      return (
-        <div className="overflow-x-auto">
-          <table className="text-[0.85em]">
-            <tbody>
-              {block.rows.map((row, i) => (
-                <tr key={i}>
-                  {row.map((cell, j) => (
-                    <td key={j} className="border px-2 py-1 align-top">
-                      {cell}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-  }
-}
-
-function List({ ordered, items }: { ordered: boolean; items: ListItem[] }) {
-  const Tag = ordered ? "ol" : "ul";
-  return (
-    <Tag className={`space-y-1 pl-5 ${ordered ? "list-decimal" : "list-disc"}`}>
-      {items.map((item, i) => (
-        <li key={i}>
-          {item.text}
-          {item.items && (
-            <div className="mt-1">
-              <List ordered={ordered} items={item.items} />
-            </div>
-          )}
-        </li>
-      ))}
-    </Tag>
   );
 }

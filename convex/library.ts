@@ -3,7 +3,7 @@ import type { Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { checkNodes, withNewKeys } from "./mapFile";
 import { nodeValidator } from "./model";
-import { deleteSources } from "./sources";
+import { deleteProjectSources } from "./sources";
 import { insertTree } from "./workspace";
 import { requireUser, requireProject, requireTopic, memberProjects } from "./auth";
 
@@ -128,7 +128,10 @@ function cleanName(name: string) {
   return trimmed;
 }
 
-/** Remove the topic, its sources, reference map, all recall attempts, and their nodes together. */
+/**
+ * Remove the topic, its reference map, all recall attempts, and their nodes
+ * together. Its project keeps the source notes.
+ */
 async function deleteTopic(ctx: MutationCtx, topicId: Id<"topics">) {
   await requireTopic(ctx, topicId);
   const maps = await ctx.db
@@ -143,7 +146,6 @@ async function deleteTopic(ctx: MutationCtx, topicId: Id<"topics">) {
     for (const node of nodes) await ctx.db.delete(node._id);
     await ctx.db.delete(map._id);
   }
-  await deleteSources(ctx, topicId);
   await ctx.db.delete(topicId);
 }
 
@@ -181,6 +183,7 @@ export const deleteProject = mutation({
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect();
     for (const topic of topics) await deleteTopic(ctx, topic._id);
+    await deleteProjectSources(ctx, projectId);
     const members = await ctx.db
       .query("projectMembers")
       .withIndex("by_project_user", (q) => q.eq("projectId", projectId))

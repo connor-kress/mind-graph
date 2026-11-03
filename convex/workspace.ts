@@ -92,7 +92,7 @@ export const seed = mutation({
           title: map.title,
         });
         await ctx.scheduler.runAfter(0, internal.sources.importText, {
-          topicId,
+          projectId,
           name: `${map.notes.heading}.md`,
           text: notesMarkdown(map.notes),
         });
