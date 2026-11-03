@@ -2,6 +2,8 @@
 
 Read [README.md](README.md) for setup, checks, and environment configuration.
 
+If [AGENTS.local.md](AGENTS.local.md) exists, read it too. It holds private instructions for a checkout and is git-ignored; follow it where it is more specific than this file.
+
 - Use `pnpm` for packages and scripts.
 
 ## Authenticated CLIs
