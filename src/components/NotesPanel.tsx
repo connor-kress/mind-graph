@@ -54,7 +54,7 @@ export function NotesPanel({ projectId, hidden, open, onOpenChange }: Props) {
     setErrors((list) => [...list, { projectId, message }]);
   const shownErrors = errors.filter((error) => error.projectId === shownId);
   // Files go to the open map's project, so none are added while the next map loads.
-  const { pending, upload } = useUpload(projectId ?? undefined, onErrorIn);
+  const { pending, upload, forget } = useUpload(projectId ?? undefined, onErrorIn);
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   // Entering a child element fires dragenter before the parent's dragleave.
@@ -188,6 +188,7 @@ export function NotesPanel({ projectId, hidden, open, onOpenChange }: Props) {
               key={shownId}
               projectId={shownId}
               pending={pending.filter((upload) => upload.projectId === shownId)}
+              onListed={forget}
               onOpen={setOpenId}
               onError={(message) => shownId && onErrorIn(shownId, message)}
             />
