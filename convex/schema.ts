@@ -62,7 +62,10 @@ export default defineSchema({
     projectId: v.id("projects"),
     /** The uploaded file. For Markdown and text, this is also the note itself. */
     storageId: v.id("_storage"),
+    /** The uploaded file's name. */
     name: v.string(),
+    /** What the note is called, at first from its file name. */
+    title: v.string(),
     kind: sourceKind,
     size: v.number(),
     status: sourceStatus,

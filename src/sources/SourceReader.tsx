@@ -140,8 +140,11 @@ export function SourceReader({ sourceId, onClose }: Props) {
         <Button variant="ghost" size="icon-xs" aria-label="Back to files" onClick={onClose}>
           <ChevronLeft />
         </Button>
-        <h3 className="min-w-0 flex-1 truncate text-xs font-medium" title={source?.name}>
-          {source?.name}
+        <h3
+          className="min-w-0 flex-1 truncate text-xs font-medium"
+          title={source ? `${source.title}\n${source.name}` : undefined}
+        >
+          {source?.title}
         </h3>
         <Button
           variant="ghost"

@@ -14,6 +14,16 @@ export function notesMarkdown(notes: SeedMap["notes"]) {
   return [`# ${notes.heading}`, ...notes.paragraphs].join("\n\n") + "\n";
 }
 
+/** Inline notes as a Markdown source, titled by their heading and in a file named after it. */
+export function notesSource(notes: SeedMap["notes"]) {
+  return {
+    title: notes.heading,
+    // Without characters some systems don't allow in file names, e.g. ":" on Windows.
+    name: `${notes.heading.replace(/\s*[\\/:*?"<>|]+\s*/g, " - ").replace(/^[\s-]+|[\s-]+$/g, "")}.md`,
+    text: notesMarkdown(notes),
+  };
+}
+
 export const demoLibrary: SeedProject[] = [
   {
     name: "Example Project",

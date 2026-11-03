@@ -10,7 +10,15 @@ import {
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { projectMembership, requireProject, requireUser } from "./auth";
-import { fileProblem, isNoteFile, kindOfFile } from "./model";
+import {
+  fileProblem,
+  isNoteFile,
+  kindOfFile,
+  fitTitle,
+  MAX_SOURCE_TITLE_LENGTH,
+  tidyTitle,
+  titleFromFileName,
+} from "./model";
 
 /** A source the current user can see, or null if it has been deleted. */
 async function requireSource(ctx: QueryCtx, sourceId: Id<"sources">) {
@@ -29,7 +37,14 @@ export const list = query({
       .query("sources")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect();
-    return docs.map(({ _id, name, kind, size, status }) => ({ _id, name, kind, size, status }));
+    return docs.map(({ _id, name, title, kind, size, status }) => ({
+      _id,
+      name,
+      title,
+      kind,
+      size,
+      status,
+    }));
   },
 });
 
@@ -39,10 +54,11 @@ export const open = query({
   handler: async (ctx, { sourceId }) => {
     const source = await requireSource(ctx, sourceId);
     if (!source) return null;
-    const { _id, name, kind, status, error, pageCount, storageId, markdownId } = source;
+    const { _id, name, title, kind, status, error, pageCount, storageId, markdownId } = source;
     return {
       _id,
       name,
+      title,
       kind,
       status,
       error,
@@ -84,6 +100,19 @@ export const add = mutation({
   },
 });
 
+/** Changes what a source is called. Its file keeps its name. */
+export const rename = mutation({
+  args: { sourceId: v.id("sources"), title: v.string() },
+  handler: async (ctx, { sourceId, title }) => {
+    const source = await requireSource(ctx, sourceId);
+    if (!source) throw new ConvexError("This note was deleted");
+    const tidy = tidyTitle(title);
+    if (!tidy) throw new ConvexError("Title can't be empty");
+    if (tidy.length > MAX_SOURCE_TITLE_LENGTH) throw new ConvexError("Title is too long");
+    await ctx.db.patch(sourceId, { title: tidy });
+  },
+});
+
 /** Deletes a source and its files. */
 export const remove = mutation({
   args: { sourceId: v.id("sources") },
@@ -103,13 +132,13 @@ export const retry = mutation({
   },
 });
 
-/** Adds text as a Markdown source, e.g. the demo notes. */
+/** Adds text as a Markdown source with its own title, e.g. the demo notes. */
 export const importText = internalAction({
-  args: { projectId: v.id("projects"), name: v.string(), text: v.string() },
-  handler: async (ctx, { projectId, name, text }) => {
+  args: { projectId: v.id("projects"), name: v.string(), title: v.string(), text: v.string() },
+  handler: async (ctx, { projectId, name, title, text }) => {
     const storageId = await ctx.storage.store(new Blob([text], { type: "text/markdown" }));
     try {
-      await ctx.runMutation(internal.sources.attach, { projectId, storageId, name });
+      await ctx.runMutation(internal.sources.attach, { projectId, storageId, name, title });
     } catch (error) {
       await ctx.storage.delete(storageId);
       throw error;
@@ -118,14 +147,19 @@ export const importText = internalAction({
 });
 
 export const attach = internalMutation({
-  args: { projectId: v.id("projects"), storageId: v.id("_storage"), name: v.string() },
-  handler: async (ctx, { projectId, storageId, name }) => {
+  args: {
+    projectId: v.id("projects"),
+    storageId: v.id("_storage"),
+    name: v.string(),
+    title: v.string(),
+  },
+  handler: async (ctx, { projectId, storageId, name, title }) => {
     // Deleted before the text was stored.
     if (!(await ctx.db.get(projectId))) {
       await ctx.storage.delete(storageId);
       return;
     }
-    await insertSource(ctx, projectId, storageId, name);
+    await insertSource(ctx, projectId, storageId, name, title);
   },
 });
 
@@ -134,6 +168,7 @@ async function insertSource(
   projectId: Id<"projects">,
   storageId: Id<"_storage">,
   name: string,
+  title?: string,
 ) {
   const file = await ctx.db.system.get(storageId);
   const kind = kindOfFile(name);
@@ -143,6 +178,8 @@ async function insertSource(
     projectId,
     storageId,
     name,
+    // Kept to what a rename allows, including an import's title or name.
+    title: fitTitle(tidyTitle(title ?? "") || titleFromFileName(name)),
     kind,
     size: file.size,
     status: note ? "ready" : "queued",

@@ -127,6 +127,7 @@ export function NotesPanel({ projectId, hidden, open, onOpenChange }: Props) {
         variant="ghost"
         size="xs"
         disabled={!projectId}
+        data-notes-upload
         onClick={() => input.current?.click()}
       >
         <Upload data-icon="inline-start" />
@@ -183,6 +184,8 @@ export function NotesPanel({ projectId, hidden, open, onOpenChange }: Props) {
             </p>
           ) : (
             <SourceList
+              // Fresh for each project, e.g. without another project's note being renamed.
+              key={shownId}
               projectId={shownId}
               pending={pending.filter((upload) => upload.projectId === shownId)}
               onOpen={setOpenId}
