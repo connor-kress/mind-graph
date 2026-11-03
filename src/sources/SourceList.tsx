@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "convex/react";
 import { BookOpen, MoreHorizontal, Pencil, RotateCw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { kindOfFile, MAX_SOURCE_TITLE_LENGTH, titleFromFileName } from "../../convex/model";
@@ -28,6 +28,8 @@ import type { PendingUpload } from "./useUpload";
 type Props = {
   projectId?: Id<"projects">;
   pending: PendingUpload[];
+  /** Called with uploads whose sources are now in the list. */
+  onListed: (uploadIds: string[]) => void;
   onOpen: (sourceId: Id<"sources">) => void;
   onError: (message: string) => void;
 };
@@ -45,8 +47,20 @@ function formatSize(bytes: number) {
 }
 
 /** A project's source files, plus the ones still uploading. */
-export function SourceList({ projectId, pending, onOpen, onError }: Props) {
+export function SourceList({ projectId, pending, onListed, onOpen, onError }: Props) {
   const sources = useQuery(api.sources.list, projectId ? { projectId } : "skip");
+  // An added upload's row stays until its source is listed, then goes for good,
+  // so it can't come back if the source is deleted. Sources seen earlier count:
+  // one can be listed, and even deleted, before its upload's response arrives.
+  const [seen] = useState(() => new Set<Id<"sources">>());
+  for (const source of sources ?? []) seen.add(source._id);
+  const listed = pending
+    .filter((upload) => upload.sourceId && seen.has(upload.sourceId))
+    .map((upload) => upload.id);
+  const listedKey = listed.join(" ");
+  useEffect(() => {
+    if (listedKey) onListed(listedKey.split(" "));
+  }, [listedKey, onListed]);
   const remove = useMutation(api.sources.remove);
   const retry = useMutation(api.sources.retry);
   const rename = useMutation(api.sources.rename);
@@ -179,17 +193,19 @@ export function SourceList({ projectId, pending, onOpen, onError }: Props) {
             </li>
           );
         })}
-        {pending.map((upload) => (
-          <li key={upload.id} className="flex items-center gap-3 px-2 py-2 opacity-60">
-            <FileIcon kind={kindOfFile(upload.name)} />
-            <span className="min-w-0">
-              <span className="block truncate text-sm text-foreground">
-                {titleFromFileName(upload.name)}
+        {pending
+          .filter((upload) => !listed.includes(upload.id))
+          .map((upload) => (
+            <li key={upload.id} className="flex items-center gap-3 px-2 py-2 opacity-60">
+              <FileIcon kind={kindOfFile(upload.name)} />
+              <span className="min-w-0">
+                <span className="block truncate text-sm text-foreground">
+                  {titleFromFileName(upload.name)}
+                </span>
+                <span className="block text-xs text-muted-foreground">Uploading…</span>
               </span>
-              <span className="block text-xs text-muted-foreground">Uploading…</span>
-            </span>
-          </li>
-        ))}
+            </li>
+          ))}
       </ul>
       {renaming && (
         <RenameDialog

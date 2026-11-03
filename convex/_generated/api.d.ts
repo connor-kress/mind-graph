@@ -9,6 +9,7 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as http from "../http.js";
 import type * as library from "../library.js";
 import type * as links from "../links.js";
 import type * as mapFile from "../mapFile.js";
@@ -28,6 +29,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  http: typeof http;
   library: typeof library;
   links: typeof links;
   mapFile: typeof mapFile;

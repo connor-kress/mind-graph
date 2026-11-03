@@ -77,6 +77,18 @@ export default defineSchema({
     pageCount: v.optional(v.number()),
   }).index("by_project", ["projectId"]),
 
+  // A one-use ticket to upload a file to a project, until it expires.
+  sourceUploads: defineTable({
+    token: v.string(),
+    projectId: v.id("projects"),
+    userId: v.string(),
+    name: v.string(),
+    size: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_token", ["token"])
+    .index("by_project", ["projectId"]),
+
   maps: defineTable({
     topicId: v.id("topics"),
     kind: mapKind,

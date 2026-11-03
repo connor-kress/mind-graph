@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import {
@@ -70,35 +71,80 @@ export const open = query({
   },
 });
 
-/** The first step of an upload: the client posts the file to this URL. */
-export const generateUploadUrl = mutation({
-  args: {},
-  handler: async (ctx) => {
-    await requireUser(ctx);
-    return ctx.storage.generateUploadUrl();
+/** How long the client has to start sending a file after asking to upload it. */
+const UPLOAD_TICKET_MS = 10 * 60_000;
+
+/**
+ * The first step of an upload: a one-use ticket binds the file to this user
+ * and project, and the client posts the bytes to the returned URL. The file
+ * is stored server-side, so a client never names a stored file it didn't upload.
+ */
+export const prepareUpload = mutation({
+  args: { projectId: v.id("projects"), name: v.string(), size: v.number() },
+  handler: async (ctx, { projectId, name, size }) => {
+    const userId = await requireUser(ctx);
+    await requireProject(ctx, projectId);
+    if (!Number.isSafeInteger(size) || size < 0) throw new ConvexError("Invalid file size");
+    const problem = fileProblem(name, size);
+    if (problem) throw new ConvexError(problem);
+    const token = crypto.randomUUID() + crypto.randomUUID();
+    const ticketId = await ctx.db.insert("sourceUploads", {
+      token,
+      projectId,
+      userId,
+      name,
+      size,
+      expiresAt: Date.now() + UPLOAD_TICKET_MS,
+    });
+    await ctx.scheduler.runAfter(UPLOAD_TICKET_MS, internal.sources.expireUpload, { ticketId });
+    return `${process.env.CONVEX_SITE_URL}/sources/upload?token=${encodeURIComponent(token)}`;
   },
 });
 
-/**
- * Adds an uploaded file to a project. A file that can't be added is deleted,
- * and the reason returned (throwing would roll the deletion back).
- */
-export const add = mutation({
-  args: { projectId: v.id("projects"), storageId: v.id("_storage"), name: v.string() },
-  handler: async (ctx, { projectId, storageId, name }) => {
-    const userId = await requireUser(ctx);
-    const file = await ctx.db.system.get(storageId);
-    if (!file) throw new ConvexError("The upload didn't finish");
-    const member =
-      (await ctx.db.get(projectId)) && (await projectMembership(ctx, projectId, userId));
-    const error = !member ? "Project not found" : fileProblem(name, file.size);
-    if (error) {
-      await ctx.storage.delete(storageId);
-      return { error };
-    }
-    return { sourceId: await insertSource(ctx, projectId, storageId, name) };
+export const expireUpload = internalMutation({
+  args: { ticketId: v.id("sourceUploads") },
+  handler: async (ctx, { ticketId }) => {
+    if (await ctx.db.get(ticketId)) await ctx.db.delete(ticketId);
   },
 });
+
+/** Uses up a ticket, returning the upload it allows, if its user can still add to the project. */
+export const claimUpload = internalMutation({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    const ticket = await ctx.db
+      .query("sourceUploads")
+      .withIndex("by_token", (q) => q.eq("token", token))
+      .unique();
+    if (!ticket) return null;
+    await ctx.db.delete(ticket._id);
+    const { projectId, userId, name, size, expiresAt } = ticket;
+    if (expiresAt < Date.now() || !(await canAdd(ctx, projectId, userId))) return null;
+    return { projectId, userId, name, size };
+  },
+});
+
+/** Adds a file the upload endpoint stored for a claimed ticket. */
+export const completeUpload = internalMutation({
+  args: {
+    projectId: v.id("projects"),
+    userId: v.string(),
+    name: v.string(),
+    size: v.number(),
+    storageId: v.id("_storage"),
+  },
+  handler: async (ctx, { projectId, userId, name, size, storageId }) => {
+    // Membership is checked again: it may have changed while the file was sent.
+    if (!(await canAdd(ctx, projectId, userId))) throw new ConvexError("Project not found");
+    const file = await ctx.db.system.get(storageId);
+    if (file?.size !== size) throw new ConvexError("The upload didn't finish");
+    return insertSource(ctx, projectId, storageId, name);
+  },
+});
+
+async function canAdd(ctx: QueryCtx, projectId: Id<"projects">, userId: string) {
+  return !!(await ctx.db.get(projectId)) && !!(await projectMembership(ctx, projectId, userId));
+}
 
 /** Changes what a source is called. Its file keeps its name. */
 export const rename = mutation({
@@ -171,8 +217,11 @@ async function insertSource(
   title?: string,
 ) {
   const file = await ctx.db.system.get(storageId);
-  const kind = kindOfFile(name);
-  if (!file || !kind) throw new ConvexError("Unsupported file");
+  if (!file) throw new ConvexError("The upload didn't finish");
+  // Checked here as well as before uploading, so every way of adding a file keeps to the limits.
+  const problem = fileProblem(name, file.size);
+  if (problem) throw new ConvexError(problem);
+  const kind = kindOfFile(name)!;
   const note = isNoteFile(kind);
   return ctx.db.insert("sources", {
     projectId,
@@ -187,13 +236,18 @@ async function insertSource(
   });
 }
 
-/** Deletes a project's sources and their files. */
+/** Deletes a project's sources and their files, and any uploads to it not yet sent. */
 export async function deleteProjectSources(ctx: MutationCtx, projectId: Id<"projects">) {
   const sources = await ctx.db
     .query("sources")
     .withIndex("by_project", (q) => q.eq("projectId", projectId))
     .collect();
   for (const source of sources) await deleteSource(ctx, source);
+  const tickets = await ctx.db
+    .query("sourceUploads")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .collect();
+  for (const ticket of tickets) await ctx.db.delete(ticket._id);
 }
 
 async function deleteSource(ctx: MutationCtx, source: Doc<"sources">) {
