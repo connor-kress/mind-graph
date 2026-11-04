@@ -17,6 +17,7 @@ import type * as migrations from "../migrations.js";
 import type * as model from "../model.js";
 import type * as nodes from "../nodes.js";
 import type * as projectMigration from "../projectMigration.js";
+import type * as runner from "../runner.js";
 import type * as seedData from "../seedData.js";
 import type * as sources from "../sources.js";
 import type * as workspace from "../workspace.js";
@@ -37,6 +38,7 @@ declare const fullApi: ApiFromModules<{
   model: typeof model;
   nodes: typeof nodes;
   projectMigration: typeof projectMigration;
+  runner: typeof runner;
   seedData: typeof seedData;
   sources: typeof sources;
   workspace: typeof workspace;

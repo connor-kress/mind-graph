@@ -78,6 +78,14 @@ export function isNoteFile(kind: SourceKind) {
 
 export const MAX_SOURCE_BYTES = 15 * 1024 * 1024;
 
+/** Pages (or slides) the document runner transcribes at most. It enforces its own copy. */
+export const MAX_SOURCE_PAGES = 75;
+
+/** Files whose text is transcribed but not their images. */
+export function losesImages(kind: SourceKind | undefined) {
+  return kind === "docx" || kind === "pptx";
+}
+
 export const MAX_SOURCE_NAME_LENGTH = 255;
 
 /** Matches file names, so a title taken from an uploaded file's name always fits. */

@@ -3,6 +3,13 @@ import { ConvexError } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { httpAction } from "./_generated/server";
+import {
+  claimEndpoint,
+  completeEndpoint,
+  failEndpoint,
+  heartbeatEndpoint,
+  uploadEndpoint,
+} from "./runner";
 
 const http = httpRouter();
 
@@ -68,5 +75,12 @@ http.route({
     }
   }),
 });
+
+// The document runner's endpoints. It calls them from a server, so they need no CORS.
+http.route({ path: "/runner/claim", method: "POST", handler: claimEndpoint });
+http.route({ path: "/runner/heartbeat", method: "POST", handler: heartbeatEndpoint });
+http.route({ path: "/runner/upload", method: "POST", handler: uploadEndpoint });
+http.route({ path: "/runner/complete", method: "POST", handler: completeEndpoint });
+http.route({ path: "/runner/fail", method: "POST", handler: failEndpoint });
 
 export default http;

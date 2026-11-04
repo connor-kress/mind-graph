@@ -127,7 +127,7 @@ export function SourceReader({ sourceId, onClose }: Props) {
             // Plain text isn't Markdown, so show it as written.
             <p className="leading-[2] whitespace-pre-wrap text-muted-foreground">{content.text}</p>
           ) : (
-            <Markdown>{content.text}</Markdown>
+            <Markdown assets={source.assetUrls}>{content.text}</Markdown>
           )}
         </div>
       </ScrollArea>

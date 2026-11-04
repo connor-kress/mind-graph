@@ -15,6 +15,20 @@ describe("notes as rendered", () => {
     expect(html).toContain("[Cat]");
   });
 
+  test("only the note's own images are shown", () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        Markdown,
+        { assets: { "p1-a": "https://files.test/a.png" } },
+        "![A](asset:p1-a) ![B](asset:p1-b) ![C](asset:toString) [D](asset:p1-a)",
+      ),
+    );
+    expect(html).toContain('<img src="https://files.test/a.png" alt="A" loading="lazy"/>');
+    expect(html).toContain("[B]");
+    expect(html).toContain("[C]");
+    expect(html).not.toContain('href="asset:');
+  });
+
   test("math is typeset, without commands that link or load anything", () => {
     expect(render("$x^2$")).toContain('class="katex"');
     const html = render(

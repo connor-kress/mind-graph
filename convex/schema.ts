@@ -75,7 +75,28 @@ export default defineSchema({
     error: v.optional(v.string()),
     /** Pages in a PDF, or slides in a presentation. */
     pageCount: v.optional(v.number()),
-  }).index("by_project", ["projectId"]),
+    /** Times the document runner has taken it to transcribe since it was queued. */
+    attempts: v.optional(v.number()),
+    /** The document runner's claim while it transcribes, renewed until it finishes. */
+    lease: v.optional(v.object({ token: v.string(), expiresAt: v.number() })),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_status", ["status"]),
+
+  // A file the document runner uploaded for a claim's result, until the claim ends.
+  runnerUploads: defineTable({
+    sourceId: v.id("sources"),
+    token: v.string(),
+    storageId: v.id("_storage"),
+  }).index("by_claim", ["sourceId", "token"]),
+
+  // An image in a source's Markdown, which links to it as `asset:<name>`.
+  sourceAssets: defineTable({
+    projectId: v.id("projects"),
+    sourceId: v.id("sources"),
+    name: v.string(),
+    storageId: v.id("_storage"),
+  }).index("by_source", ["sourceId"]),
 
   // A one-use ticket to upload a file to a project, until it expires.
   sourceUploads: defineTable({

@@ -11,6 +11,7 @@ import {
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { projectMembership, requireProject, requireUser } from "./auth";
+import { deleteSourceFiles, nudge } from "./runner";
 import {
   fileProblem,
   isNoteFile,
@@ -49,13 +50,17 @@ export const list = query({
   },
 });
 
-/** A source with links to its Markdown and, for transcribed files, the original. */
+/** A source with links to its Markdown and its images, and for transcribed files, the original. */
 export const open = query({
   args: { sourceId: v.id("sources") },
   handler: async (ctx, { sourceId }) => {
     const source = await requireSource(ctx, sourceId);
     if (!source) return null;
     const { _id, name, title, kind, status, error, pageCount, storageId, markdownId } = source;
+    const assets = await ctx.db
+      .query("sourceAssets")
+      .withIndex("by_source", (q) => q.eq("sourceId", sourceId))
+      .collect();
     return {
       _id,
       name,
@@ -67,6 +72,12 @@ export const open = query({
       // A Markdown or text file is its own note, so it has no separate original.
       originalUrl: isNoteFile(kind) ? null : await ctx.storage.getUrl(storageId),
       markdownUrl: markdownId ? await ctx.storage.getUrl(markdownId) : null,
+      /** Image URLs by the name the Markdown links to them with, as `asset:<name>`. */
+      assetUrls: Object.fromEntries(
+        await Promise.all(
+          assets.map(async (asset) => [asset.name, await ctx.storage.getUrl(asset.storageId)]),
+        ),
+      ) as Record<string, string | null>,
     };
   },
 });
@@ -174,7 +185,8 @@ export const retry = mutation({
   handler: async (ctx, { sourceId }) => {
     const source = await requireSource(ctx, sourceId);
     if (source?.status !== "failed") return;
-    await ctx.db.patch(sourceId, { status: "queued", error: undefined });
+    await ctx.db.patch(sourceId, { status: "queued", error: undefined, attempts: undefined });
+    await nudge(ctx);
   },
 });
 
@@ -223,6 +235,7 @@ async function insertSource(
   if (problem) throw new ConvexError(problem);
   const kind = kindOfFile(name)!;
   const note = isNoteFile(kind);
+  if (!note) await nudge(ctx);
   return ctx.db.insert("sources", {
     projectId,
     storageId,
@@ -251,7 +264,7 @@ export async function deleteProjectSources(ctx: MutationCtx, projectId: Id<"proj
 }
 
 async function deleteSource(ctx: MutationCtx, source: Doc<"sources">) {
-  const files = new Set([source.storageId, source.markdownId]);
-  for (const id of files) if (id) await ctx.storage.delete(id);
+  await deleteSourceFiles(ctx, source);
+  await ctx.storage.delete(source.storageId);
   await ctx.db.delete(source._id);
 }

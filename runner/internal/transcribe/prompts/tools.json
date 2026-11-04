@@ -1,0 +1,120 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "inspect_asset",
+      "description": "Return real pixels of an original or previous crop. Can zoom with crop.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "type": "string"
+          }
+        },
+        "required": ["asset_id"],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "crop",
+      "description": "Return actual crop pixels. bbox is [left,top,right,bottom] normalized 0..1000, where 50 percent is 500, relative to full page or selected asset. Use complete related panels and labels. Can revise with another call.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "asset_id": {
+            "type": "string"
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": ["bbox", "reason"],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "record_figure_plan",
+      "description": "Record the figure decision for every page before final output. Does not alter source or create assets.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "page": {
+                  "type": "integer"
+                },
+                "groups": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "description": {
+                        "type": "string"
+                      },
+                      "asset_ids": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "decision": {
+                        "type": "string",
+                        "enum": ["original", "crop", "none"]
+                      }
+                    },
+                    "required": ["description", "asset_ids", "decision"]
+                  }
+                }
+              },
+              "required": ["page", "groups"]
+            }
+          }
+        },
+        "required": ["pages"],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "render_pages",
+      "description": "Render all uncertain physical pages in one batch for figure selection. Crop coordinates remain relative to each full page, not this contact sheet. At most 8 pages.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pages": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "maxItems": 8
+          }
+        },
+        "required": ["pages"],
+        "additionalProperties": false
+      }
+    }
+  }
+]
