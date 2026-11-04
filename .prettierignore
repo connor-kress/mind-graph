@@ -1,3 +1,4 @@
 convex/_generated
 pnpm-lock.yaml
 mocks
+runner/out

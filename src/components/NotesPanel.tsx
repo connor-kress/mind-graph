@@ -1,7 +1,7 @@
 import { BookOpen, LockKeyhole, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import type { Id } from "../../convex/_generated/dataModel";
-import { SOURCE_KINDS } from "../../convex/model";
+import { kindOfFile, losesImages, SOURCE_KINDS } from "../../convex/model";
 import { useIsMobile } from "../hooks/use-mobile";
 import { SourceList } from "../sources/SourceList";
 import { SourceReader } from "../sources/SourceReader";
@@ -87,9 +87,19 @@ export function NotesPanel({ projectId, hidden, open, onOpenChange }: Props) {
 
   const addFiles = (files: FileList | null) => {
     if (!files?.length || !projectId) return;
+    let chosen = [...files];
+    if (
+      chosen.some((file) => losesImages(kindOfFile(file.name))) &&
+      !confirm(
+        "Only the text of Word and PowerPoint files is transcribed, not their images. To keep figures, export the file as a PDF and upload that instead.\n\nUpload anyway?",
+      )
+    ) {
+      chosen = chosen.filter((file) => !losesImages(kindOfFile(file.name)));
+    }
+    if (!chosen.length) return;
     setErrors([]);
     setOpenId(null);
-    upload(files);
+    upload(chosen);
   };
 
   const dropZone = hidden

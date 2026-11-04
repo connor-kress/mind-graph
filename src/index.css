@@ -341,3 +341,7 @@ body {
 .note-markdown .katex-display {
   @apply overflow-x-auto overflow-y-hidden py-1;
 }
+
+.note-markdown img {
+  @apply inline-block h-auto max-w-full rounded-md border bg-white;
+}

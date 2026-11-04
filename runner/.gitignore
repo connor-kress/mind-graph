@@ -1,0 +1,4 @@
+# Built binary
+/runner
+# Output of `go run . transcribe`
+/out/

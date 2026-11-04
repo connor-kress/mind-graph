@@ -26,6 +26,8 @@ pnpm lint
 pnpm exec tsc -p convex/tsconfig.json --noEmit
 ```
 
+Markdown and text notes are ready as soon as they're uploaded. PDF, Word and PowerPoint files wait for the [document runner](runner/README.md) to transcribe them; run it locally with `cd runner && go run .` after setting it up.
+
 The sidebar supports map search with `Ctrl`/`Cmd` + `K` and collapses with `Ctrl`/`Cmd` + `\`. Project and map actions are available from their menus or a right-click.
 
 Existing account-owned folders migrate to projects on sign-in, preserving map URLs and recall history. The internal `workspace:migrateProjects` backfill accepts `phase: "folders"` or `phase: "topics"` and an optional `cursor`; finish the folders phase before running topics, passing each returned cursor until `isDone`. Legacy tables remain for migration compatibility, and pre-account data stays unclaimed.

@@ -3,7 +3,13 @@ import { BookOpen, MoreHorizontal, Pencil, RotateCw, Trash2 } from "lucide-react
 import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { kindOfFile, MAX_SOURCE_TITLE_LENGTH, titleFromFileName } from "../../convex/model";
+import {
+  kindOfFile,
+  MAX_SOURCE_BYTES,
+  MAX_SOURCE_PAGES,
+  MAX_SOURCE_TITLE_LENGTH,
+  titleFromFileName,
+} from "../../convex/model";
 import { RenameDialog } from "../components/RenameDialog";
 import { Button } from "../components/ui/button";
 import {
@@ -85,8 +91,8 @@ export function SourceList({ projectId, pending, onListed, onOpen, onError }: Pr
         <BookOpen className="mx-auto mb-3 size-7 text-muted-foreground/50" />
         <p className="font-medium text-foreground">No source notes yet</p>
         <p className="mt-1 leading-6 text-muted-foreground">
-          Drag files here or click Upload. Markdown, text, Word, PDF, and PowerPoint files up to 15
-          MB.
+          Drag files here or click Upload. Markdown, text, Word, PDF, and PowerPoint files up to{" "}
+          {MAX_SOURCE_BYTES / 1024 / 1024} MB and {MAX_SOURCE_PAGES} pages.
         </p>
       </div>
     );
