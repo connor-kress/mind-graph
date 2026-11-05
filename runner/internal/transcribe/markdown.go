@@ -10,8 +10,8 @@ import (
 var (
 	fence       = regexp.MustCompile("(?s)^\\s*```(?:markdown|md)?\\s*\n(.*?)\n```\\s*$")
 	pageHeading = regexp.MustCompile(`(?m)^## Page (\d+)[ \t]*$`)
-	assetImage  = regexp.MustCompile(`!\[([^\]]*)\]\(asset:([^\s)]+)(?:\s+"[^"]*")?\)`)
-	bareImage   = regexp.MustCompile(`(!\[[^\]]*\]\()([^\s):]+(?:\s+"[^"]*")?\))`)
+	assetImage  = regexp.MustCompile(`!\[([^\]]*)\]\(asset:([^\s)]+)(?:\s+"[^"]*")?\s*\)`)
+	bareImage   = regexp.MustCompile(`(!\[[^\]]*\]\()([^\s):]+(?:\s+"[^"]*")?\s*\))`)
 )
 
 // unfence removes a code fence around the whole response, which the prompts ask the model not to add.
