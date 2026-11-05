@@ -25,9 +25,11 @@ func TestRenumber(t *testing.T) {
 }
 
 func TestLinkAssets(t *testing.T) {
-	md := `![A](asset:img1) ![B](asset:missing) ![A again](asset:img1 "title") ![C](asset:crop2) ![D](https://x.test/d.png)`
-	got, used := linkAssets(md, func(id string) bool { return id != "missing" })
-	if strings.Contains(got, "missing") || !strings.Contains(got, "https://x.test/d.png") {
+	md := `![A](asset:img1) ![B](asset:missing) ![A again](asset:img1 "title") ![C](asset:crop2) ![D](https://x.test/d.png) ![Bare](img1 "title") ![Invented](crop9) ![Logo](logo) ![Path](d.png)`
+	known := func(id string) bool { return id == "img1" || id == "crop2" }
+	got, used := linkAssets(md, known)
+	want := `![A](asset:img1)  ![A again](asset:img1 "title") ![C](asset:crop2) ![D](https://x.test/d.png) ![Bare](asset:img1 "title")   `
+	if got != want {
 		t.Errorf("linkAssets = %q", got)
 	}
 	if !reflect.DeepEqual(used, []string{"img1", "crop2"}) {

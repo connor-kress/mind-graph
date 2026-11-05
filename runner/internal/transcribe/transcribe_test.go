@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -391,6 +392,73 @@ func TestAnIncompleteAnswerIsSentBack(t *testing.T) {
 	result, err := testPDF(ai, 2).Transcribe(context.Background(), "a.pdf", []byte("%PDF"), t.TempDir())
 	if err != nil || !strings.Contains(result.Markdown, "Two.") {
 		t.Errorf("result = %v, %v", result, err)
+	}
+}
+
+func TestLinksToMissingImagesAreSentBack(t *testing.T) {
+	turn := 0
+	ai := scriptedModel(t, func(r fakeRequest) fakeReply {
+		turn++
+		switch turn {
+		case 1:
+			return fakeReply{content: "## Page 1\n\n![Planned](asset:crop??) ![Invented](crop9)"}
+		case 2:
+			if !strings.Contains(r.last(), "[crop?? crop9]") || r.Tools == nil {
+				t.Errorf("last message = %s, tools = %s", r.last(), r.Tools)
+			}
+			return fakeReply{calls: []openrouter.ToolCall{toolCall("c1", "crop", `{"page":1,"bbox":[0,0,500,500],"reason":"diagram"}`)}}
+		default:
+			return fakeReply{content: "## Page 1\n\n![A diagram](asset:crop1)"}
+		}
+	})
+	tr := testPDF(ai, 1)
+	tr.Config.Turns = 3
+	result, err := tr.Transcribe(context.Background(), "a.pdf", []byte("%PDF"), t.TempDir())
+	if err != nil || len(result.Assets) != 1 || !strings.Contains(result.Markdown, "asset:crop1") {
+		t.Errorf("result = %v, %v", result, err)
+	}
+}
+
+func TestAFailedImageFixKeepsTheAnswer(t *testing.T) {
+	const draft = "## Page 1\n\n![Planned](crop9)\n\nOne."
+	for name, test := range map[string]struct {
+		fix  fakeReply
+		want string
+	}{
+		"still broken":  {fakeReply{content: "## Page 1\n\n![Planned](crop9)\n\nNewer."}, "Newer."},
+		"missing pages": {fakeReply{content: "No headings."}, "One."},
+		"cut off":       {fakeReply{content: "## Page", finish: "length"}, "One."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			turn := 0
+			ai := scriptedModel(t, func(fakeRequest) fakeReply {
+				turn++
+				if turn == 1 {
+					return fakeReply{content: draft}
+				}
+				return test.fix
+			})
+			result, err := testPDF(ai, 1).Transcribe(context.Background(), "a.pdf", []byte("%PDF"), t.TempDir())
+			if err != nil || strings.Contains(result.Markdown, "crop9") || !strings.Contains(result.Markdown, test.want) {
+				t.Errorf("turns = %d, result = %v, %v", turn, result, err)
+			}
+		})
+	}
+}
+
+func TestCancellingDuringAnImageFixDoesntKeepTheAnswer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	turn := 0
+	ai := scriptedModel(t, func(fakeRequest) fakeReply {
+		turn++
+		if turn == 2 {
+			cancel()
+		}
+		return fakeReply{content: "## Page 1\n\n![Planned](crop9)"}
+	})
+	if result, err := testPDF(ai, 1).Transcribe(ctx, "a.pdf", []byte("%PDF"), t.TempDir()); !errors.Is(err, context.Canceled) {
+		t.Errorf("result = %v, err = %v", result, err)
 	}
 }
 
