@@ -86,8 +86,8 @@ func Load(envFile string) (Config, error) {
 	}{
 		{"MAX_PAGES", pageLimit, &c.MaxPages},
 		{"RANGE_PAGES", 25, &c.RangePages},
-		{"TURNS", 16, &c.Turns},
-		{"MAX_CROPS", 40, &c.MaxCrops},
+		{"TURNS", 8, &c.Turns},
+		{"MAX_CROPS", 120, &c.MaxCrops},
 		{"PARALLEL", 3, &c.Parallel},
 	}
 	for _, i := range ints {
@@ -99,8 +99,12 @@ func Load(envFile string) (Config, error) {
 	if c.MaxPages < 1 || c.MaxPages > pageLimit {
 		return c, fmt.Errorf("MAX_PAGES must be from 1 to %d", pageLimit)
 	}
-	if c.RangePages < 1 || c.Turns < 1 || c.Parallel < 1 {
-		return c, fmt.Errorf("RANGE_PAGES, TURNS and PARALLEL must be at least 1")
+	if c.RangePages < 1 || c.Parallel < 1 {
+		return c, fmt.Errorf("RANGE_PAGES and PARALLEL must be at least 1")
+	}
+	// The last two have no tools.
+	if c.Turns < 3 {
+		return c, fmt.Errorf("TURNS must be at least 3")
 	}
 	if c.OpenRouterKey == "" {
 		return c, fmt.Errorf("OPENROUTER_API_KEY is not set")

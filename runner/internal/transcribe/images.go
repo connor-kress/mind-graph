@@ -64,6 +64,31 @@ func crop(img image.Image, box [4]float64) (image.Image, error) {
 	return out, nil
 }
 
+// withGrid copies an image with lines and labels every 100 of its 0 to 1000
+// coordinates, so crops of it can be placed by reading them.
+func withGrid(img image.Image) image.Image {
+	b := img.Bounds()
+	out := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	draw.Draw(out, out.Bounds(), img, b.Min, draw.Src)
+	line := image.NewUniform(color.NRGBA{0, 90, 200, 70})
+	ink := image.NewUniform(color.RGBA{0, 60, 170, 255})
+	back := image.NewUniform(color.White)
+	label := func(s string, x, y int) {
+		box := image.Rect(x, y, x+7*len(s)+2, y+13)
+		draw.Draw(out, box, back, image.Point{}, draw.Src)
+		d := font.Drawer{Dst: out, Src: ink, Face: basicfont.Face7x13, Dot: fixed.P(x+1, y+11)}
+		d.DrawString(s)
+	}
+	for v := 100; v < 1000; v += 100 {
+		x, y := v*b.Dx()/1000, v*b.Dy()/1000
+		draw.Draw(out, image.Rect(x, 0, x+1, b.Dy()), line, image.Point{}, draw.Over)
+		draw.Draw(out, image.Rect(0, y, b.Dx(), y+1), line, image.Point{}, draw.Over)
+		label(fmt.Sprint(v), x+2, 0)
+		label(fmt.Sprint(v), 0, y+1)
+	}
+	return out
+}
+
 // tile is an image on a contact sheet, with lines of text above it.
 type tile struct {
 	img   image.Image

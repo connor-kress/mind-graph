@@ -3,15 +3,22 @@
     "type": "function",
     "function": {
       "name": "inspect_asset",
-      "description": "Return real pixels of an original or previous crop. Can zoom with crop.",
+      "description": "Return real pixels of originals or previous crops. Ask for all you need together, up to 12 in a call.",
       "parameters": {
         "type": "object",
         "properties": {
-          "asset_id": {
-            "type": "string"
+          "asset_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 12
           }
         },
-        "required": ["asset_id"],
+        "required": [
+          "asset_ids"
+        ],
         "additionalProperties": false
       }
     }
@@ -20,29 +27,42 @@
     "type": "function",
     "function": {
       "name": "crop",
-      "description": "Return actual crop pixels. bbox is [left,top,right,bottom] normalized 0..1000, where 50 percent is 500, relative to full page or selected asset. Use complete related panels and labels. Can revise with another call.",
+      "description": "Cut regions from pages or assets and return their pixels, with an ID for each. Ask for all you need together, up to 12 in a call. Each region names a page or an asset_id. bbox is [left,top,right,bottom] normalized 0..1000, where 50 percent is 500, relative to the full page or selected asset. Use complete related panels and labels. Can revise with another call.",
       "parameters": {
         "type": "object",
         "properties": {
-          "page": {
-            "type": "integer"
-          },
-          "asset_id": {
-            "type": "string"
-          },
-          "bbox": {
+          "regions": {
             "type": "array",
+            "minItems": 1,
+            "maxItems": 12,
             "items": {
-              "type": "number"
-            },
-            "minItems": 4,
-            "maxItems": 4
-          },
-          "reason": {
-            "type": "string"
+              "type": "object",
+              "properties": {
+                "page": {
+                  "type": "integer"
+                },
+                "asset_id": {
+                  "type": "string"
+                },
+                "bbox": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 4,
+                  "maxItems": 4
+                }
+              },
+              "required": [
+                "bbox"
+              ],
+              "additionalProperties": false
+            }
           }
         },
-        "required": ["bbox", "reason"],
+        "required": [
+          "regions"
+        ],
         "additionalProperties": false
       }
     }
@@ -51,7 +71,7 @@
     "type": "function",
     "function": {
       "name": "render_pages",
-      "description": "Render physical pages for a closer look, in one batch. Crop coordinates remain relative to each full page, not this contact sheet. At most 8 pages.",
+      "description": "Render physical pages for a closer look, in one batch, with the coordinate grid. Crop coordinates remain relative to each full page. At most 12 pages.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -61,10 +81,12 @@
               "type": "integer"
             },
             "minItems": 1,
-            "maxItems": 8
+            "maxItems": 12
           }
         },
-        "required": ["pages"],
+        "required": [
+          "pages"
+        ],
         "additionalProperties": false
       }
     }

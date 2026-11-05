@@ -16,6 +16,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -100,7 +102,7 @@ func testPDF(ai *openrouter.Client, pages int) *PDF {
 		panic(err)
 	}
 	return &PDF{
-		Config:  config.Config{MaxPages: 75, RangePages: 4, Turns: 2, MaxCrops: 12, Parallel: 2},
+		Config:  config.Config{MaxPages: 75, RangePages: 4, Turns: 3, MaxCrops: 12, Parallel: 2},
 		AI:      ai,
 		Tool:    fakePDF{pages: pages},
 		Prompts: prompts,
@@ -296,6 +298,20 @@ func (fakeRequest) images(t *testing.T, content json.RawMessage) []image.Image {
 	return out
 }
 
+// hasGrid reports whether a gray page has withGrid's blue lines on it.
+func hasGrid(img image.Image) bool {
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, _, bl, _ := img.At(x, y).RGBA()
+			if bl>>8 > r>>8+20 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // byte10 is the gray fakePDF draws page n in.
 func byte10(n int) uint32 { return uint32(n * 10) }
 
@@ -342,8 +358,13 @@ func TestTheModelCanUseToolsBeforeAnswering(t *testing.T) {
 			if r.Tools == nil {
 				t.Error("tools should be offered before the last turn")
 			}
+			for _, sheet := range r.images(t, r.Messages[0].Content) {
+				if !hasGrid(sheet) {
+					t.Error("a preview has no grid")
+				}
+			}
 			return fakeReply{calls: []openrouter.ToolCall{
-				toolCall("c1", "crop", `{"page":1,"bbox":[0,0,500,500],"reason":"diagram"}`),
+				toolCall("c1", "crop", `{"regions":[{"page":1,"bbox":[0,0,500,500]}]}`),
 				toolCall("c2", "render_pages", `{"pages":[1,2]}`),
 			}}
 		default:
@@ -355,10 +376,13 @@ func TestTheModelCanUseToolsBeforeAnswering(t *testing.T) {
 			if len(images) != 3 {
 				t.Fatalf("%d images in the feedback", len(images))
 			}
+			if hasGrid(images[0]) {
+				t.Error("a crop has the grid")
+			}
 			for i, img := range images[1:] {
 				gray, _, _, _ := img.At(0, 0).RGBA()
-				if img.Bounds().Dx() != inspectSize || gray>>8 < byte10(i+1)-3 || gray>>8 > byte10(i+1)+3 {
-					t.Errorf("render %d is %v, gray %d", i+1, img.Bounds(), gray>>8)
+				if img.Bounds().Dx() != inspectSize || gray>>8 < byte10(i+1)-3 || gray>>8 > byte10(i+1)+3 || !hasGrid(img) {
+					t.Errorf("render %d is %v, gray %d, grid %v", i+1, img.Bounds(), gray>>8, hasGrid(img))
 				}
 			}
 			if !strings.Contains(r.last(), "PHYSICAL PDF PAGE 2") {
@@ -406,13 +430,13 @@ func TestLinksToMissingImagesAreSentBack(t *testing.T) {
 			if !strings.Contains(r.last(), "[crop?? crop9]") || r.Tools == nil {
 				t.Errorf("last message = %s, tools = %s", r.last(), r.Tools)
 			}
-			return fakeReply{calls: []openrouter.ToolCall{toolCall("c1", "crop", `{"page":1,"bbox":[0,0,500,500],"reason":"diagram"}`)}}
+			return fakeReply{calls: []openrouter.ToolCall{toolCall("c1", "crop", `{"regions":[{"page":1,"bbox":[0,0,500,500]}]}`)}}
 		default:
 			return fakeReply{content: "## Page 1\n\n![A diagram](asset:crop1)"}
 		}
 	})
 	tr := testPDF(ai, 1)
-	tr.Config.Turns = 3
+	tr.Config.Turns = 4
 	result, err := tr.Transcribe(context.Background(), "a.pdf", []byte("%PDF"), t.TempDir())
 	if err != nil || len(result.Assets) != 1 || !strings.Contains(result.Markdown, "asset:crop1") {
 		t.Errorf("result = %v, %v", result, err)
@@ -462,6 +486,152 @@ func TestCancellingDuringAnImageFixDoesntKeepTheAnswer(t *testing.T) {
 	}
 }
 
+func TestOneCallCanCropAndInspectSeveral(t *testing.T) {
+	turn := 0
+	ai := scriptedModel(t, func(r fakeRequest) fakeReply {
+		turn++
+		switch turn {
+		case 1:
+			return fakeReply{calls: []openrouter.ToolCall{toolCall("c1", "crop", `{"regions":[{"page":1,"bbox":[0,0,500,500]},{"page":9,"bbox":[0,0,1,1]},{"page":2,"bbox":[0,0,500,500]}]}`)}}
+		case 2:
+			images := r.images(t, r.Messages[len(r.Messages)-2].Content)
+			if len(images) != 2 || !strings.Contains(r.last(), "page 9 doesn't exist") {
+				t.Errorf("%d images, and the bad region wasn't reported", len(images))
+			}
+			return fakeReply{calls: []openrouter.ToolCall{toolCall("c2", "inspect_asset", `{"asset_ids":["crop1","crop2","nope"]}`)}}
+		default:
+			images := r.images(t, r.Messages[len(r.Messages)-2].Content)
+			if len(images) != 2 || !strings.Contains(r.last(), "no asset") {
+				t.Errorf("%d images, and the bad ID wasn't reported", len(images))
+			}
+			return fakeReply{content: "## Page 1\n\n![A](asset:crop1)\n\n## Page 2\n\n![B](asset:crop2)"}
+		}
+	})
+	tr := testPDF(ai, 2)
+	tr.Config.Turns = 4
+	result, err := tr.Transcribe(context.Background(), "a.pdf", []byte("%PDF"), t.TempDir())
+	if err != nil || len(result.Assets) != 2 {
+		t.Fatalf("result = %v, %v", result, err)
+	}
+	// Crops come from a clean render, without the previews' grid.
+	img, err := decodeImageFile(result.Assets[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := img.Bounds()
+	want := img.At(b.Min.X, b.Min.Y)
+	for x := b.Min.X; x < b.Max.X; x++ {
+		if img.At(x, b.Min.Y+b.Dy()/2) != want {
+			t.Fatalf("the crop isn't clean at x = %d", x)
+		}
+	}
+}
+
+func TestTheModelIsOnlyToldOfItsTurnsNearTheEndWhichHaveNoTools(t *testing.T) {
+	remaining := regexp.MustCompile(`You have (\d+) response turns`)
+	var told []string
+	var tools []bool
+	ai := scriptedModel(t, func(r fakeRequest) fakeReply {
+		count := ""
+		if m := remaining.FindSubmatch(r.Messages[len(r.Messages)-1].Content); m != nil {
+			count = string(m[1])
+		}
+		told = append(told, count)
+		tools = append(tools, r.Tools != nil)
+		switch {
+		case len(told) < 4:
+			return fakeReply{calls: []openrouter.ToolCall{toolCall("c", "render_pages", `{"pages":[1]}`)}}
+		case len(told) == 4:
+			return fakeReply{content: "No headings."}
+		}
+		return fakeReply{content: "## Page 1\n\nOne."}
+	})
+	tr := testPDF(ai, 1)
+	tr.Config.Turns = 5
+	if _, err := tr.Transcribe(context.Background(), "a.pdf", []byte("%PDF"), t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(told, []string{"", "", "3", "2", "1"}) || !reflect.DeepEqual(tools, []bool{true, true, true, false, false}) {
+		t.Errorf("told = %q, tools = %v", told, tools)
+	}
+}
+
+func TestContactSheetsOfOriginals(t *testing.T) {
+	dir := t.TempDir()
+	r := &pagesRun{assets: map[string]*Asset{}}
+	for i := range 3 {
+		data, _ := encodePNG(image.NewGray(image.Rect(0, 0, 900, 700)))
+		id := fmt.Sprintf("img%d", i+1)
+		path := filepath.Join(dir, id+".png")
+		os.WriteFile(path, data, 0o600)
+		r.assets[id] = &Asset{ID: id, seq: int64(i), Path: path}
+	}
+	parts, _ := json.Marshal(r.assetSheets())
+	sheets := fakeRequest{}.images(t, parts)
+	if len(sheets) != 2 {
+		t.Fatalf("%d sheets", len(sheets))
+	}
+	for _, s := range sheets {
+		if s.Bounds().Dx() != 1640 || s.Bounds().Dy() != 650 {
+			t.Errorf("a sheet is %v", s.Bounds())
+		}
+	}
+}
+
+func TestACropOfAnAssetNamesIt(t *testing.T) {
+	dir := t.TempDir()
+	data, _ := encodePNG(image.NewGray(image.Rect(0, 0, 100, 100)))
+	path := filepath.Join(dir, "a.png")
+	os.WriteFile(path, data, 0o600)
+	var ids, crops atomic.Int64
+	r := &pagesRun{t: testPDF(nil, 1), dir: dir, ids: &ids, crops: &crops, assets: map[string]*Asset{"img1": {ID: "img1", page: 1, Path: path}}}
+	result, _, err := r.crop(context.Background(), region{AssetID: "img1", BBox: []float64{0, 0, 500, 500}})
+	if err != nil || result["source"] != "img1" {
+		t.Errorf("result = %v, %v", result, err)
+	}
+}
+
+func TestComposedHints(t *testing.T) {
+	var seq int64
+	placed := func(id string, page int, box [4]float64) *Asset {
+		seq++
+		return &Asset{ID: id, seq: seq, page: page, placements: []placement{{page, box}}}
+	}
+	r := &pagesRun{pages: 4, assets: map[string]*Asset{
+		"img1": placed("img1", 1, [4]float64{100, 100, 500, 500}),
+		"img2": placed("img2", 1, [4]float64{200, 200, 400, 400}),
+		"img3": placed("img3", 1, [4]float64{600, 600, 900, 900}),
+		"img8": placed("img8", 1, [4]float64{650, 650, 800, 800}),
+		// A page's background and what's drawn on it aren't a composed figure.
+		"img4": placed("img4", 2, [4]float64{0, 0, 1000, 1000}),
+		"img5": placed("img5", 2, [4]float64{100, 100, 400, 400}),
+		// Barely touching isn't overlapping.
+		"img6": placed("img6", 3, [4]float64{0, 0, 500, 500}),
+		"img7": placed("img7", 3, [4]float64{490, 490, 900, 900}),
+		// Drawn twice, with only its second placement over another.
+		"img9":  {ID: "img9", seq: 100, page: 4, placements: []placement{{4, [4]float64{0, 0, 100, 100}}, {4, [4]float64{500, 500, 600, 600}}}},
+		"img10": placed("img10", 4, [4]float64{500, 500, 700, 700}),
+	}}
+	got := r.composedHints()
+	if !strings.Contains(got, "Page 1 draws img1, img2 over each other") || !strings.Contains(got, "Page 1 draws img3, img8 over each other") || !strings.Contains(got, "img10") || strings.Contains(got, "Page 2") || strings.Contains(got, "Page 3") {
+		t.Errorf("hints = %q", got)
+	}
+}
+
+func TestWithGrid(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 1000, 1000))
+	for i := range src.Pix {
+		src.Pix[i] = 255
+	}
+	got := withGrid(src)
+	if got.At(500, 700) == src.At(500, 700) || got.At(550, 750) != src.At(550, 750) {
+		t.Errorf("at the 500 line: %v; between lines: %v", got.At(500, 700), got.At(550, 750))
+	}
+	if src.At(500, 700) != (color.RGBA{255, 255, 255, 255}) {
+		t.Error("withGrid drew on its source")
+	}
+}
+
 func TestCropsOfACutOffAttemptAreRefunded(t *testing.T) {
 	ai := scriptedModel(t, func(r fakeRequest) fakeReply {
 		cropped := strings.Contains(r.last(), "tool_call_id") || len(r.Messages) > 2
@@ -469,7 +639,7 @@ func TestCropsOfACutOffAttemptAreRefunded(t *testing.T) {
 		case r.file() == "pages-2-2.pdf":
 			return fakeReply{content: "## Page 1\n\nTwo."}
 		case !cropped:
-			return fakeReply{calls: []openrouter.ToolCall{toolCall("c", "crop", `{"page":1,"bbox":[0,0,500,500],"reason":"x"}`)}}
+			return fakeReply{calls: []openrouter.ToolCall{toolCall("c", "crop", `{"regions":[{"page":1,"bbox":[0,0,500,500]}]}`)}}
 		case r.file() == "pages-1-2.pdf":
 			return fakeReply{content: "## Page 1\n\nPartial", finish: "length"}
 		case strings.Contains(r.last(), "crop limit"):

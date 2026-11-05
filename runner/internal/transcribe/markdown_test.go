@@ -25,10 +25,10 @@ func TestRenumber(t *testing.T) {
 }
 
 func TestLinkAssets(t *testing.T) {
-	md := `![A](asset:img1) ![B](asset:missing) ![A again](asset:img1 "title") ![C](asset:crop2) ![D](https://x.test/d.png) ![Bare](img1 "title") ![Invented](crop9) ![Logo](logo) ![Path](d.png)`
+	md := `![A](asset:img1) ![B](asset:missing) ![A again](asset:img1 "title") ![C](asset:crop2) ![D](https://x.test/d.png) ![Bare](img1 "title") ![Invented](crop9) ![Logo](logo) ![Path](d.png) ![Placeholder](crop? )`
 	known := func(id string) bool { return id == "img1" || id == "crop2" }
 	got, used := linkAssets(md, known)
-	want := `![A](asset:img1)  ![A again](asset:img1 "title") ![C](asset:crop2) ![D](https://x.test/d.png) ![Bare](asset:img1 "title")   `
+	want := `![A](asset:img1)  ![A again](asset:img1 "title") ![C](asset:crop2) ![D](https://x.test/d.png) ![Bare](asset:img1 "title")    `
 	if got != want {
 		t.Errorf("linkAssets = %q", got)
 	}
