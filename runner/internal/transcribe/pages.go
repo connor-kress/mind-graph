@@ -8,21 +8,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync/atomic"
 
 	"github.com/connor-kress/mind-graph/runner/internal/openrouter"
 	"github.com/connor-kress/mind-graph/runner/internal/pdf"
 )
 
-// The figure pass links each page's figures after its text is transcribed. The
-// model sees the native PDF, every original bitmap and page previews, and uses
-// local tools to inspect, render and crop, getting real pixels back.
-
-const figureMaxTokens = 12000
+// Each range of a PDF's pages is one conversation with the model. It sees the
+// native PDF, every original bitmap and page previews, and uses local tools to
+// inspect, render and crop, getting real pixels back, until it returns the
+// range's Markdown.
 
 // Bitmaps smaller than this on either side are taken to be decoration.
 const minAssetSide = 25
@@ -34,96 +35,113 @@ const (
 	cropSize    = 2400
 )
 
-// figureRun is one range's figure pass.
-type figureRun struct {
-	t      *PDF
-	pdf    string // The range as its own PDF, with pages counted from 1.
-	pages  int
-	dir    string
-	ids    *atomic.Int64
+// pagesRun is one conversation about a range of pages.
+type pagesRun struct {
+	t     *PDF
+	pdf   string // The range as its own PDF, with pages counted from 1.
+	pages int
+	dir   string
+	ids   *atomic.Int64
+	// The originals found and crops made, by ID.
 	assets map[string]*Asset
-	// Crops so far, across the document.
-	crops *atomic.Int64
+	// Crops so far, across the document, and in this conversation.
+	crops   *atomic.Int64
+	cropped int64
 	// The last page rendered to crop from, by page.
 	cropPage   int
 	cropSource image.Image
-	plans      int
 }
 
-// figurePass returns Markdown with ## Page N sections, counted within the range, and the assets it may link to.
-func (t *PDF) figurePass(ctx context.Context, source string, first, last int, dir string, ids, crops *atomic.Int64) (string, []*Asset, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", nil, err
+// run returns the range's Markdown, with ## Page N sections counted within the range.
+func (r *pagesRun) run(ctx context.Context, source string, first, last int) (string, error) {
+	t := r.t
+	if err := os.MkdirAll(r.dir, 0o700); err != nil {
+		return "", err
 	}
-	r := &figureRun{t: t, pdf: filepath.Join(dir, "range.pdf"), pages: last - first + 1, dir: dir, ids: ids,
-		assets: map[string]*Asset{}, crops: crops}
+	r.pdf = filepath.Join(r.dir, "pages.pdf")
 	if err := t.Tool.Split(ctx, source, first, last, r.pdf); err != nil {
-		return "", nil, err
+		return "", err
 	}
 	pdfData, err := os.ReadFile(r.pdf)
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
 	if err := r.findOriginals(ctx); err != nil {
-		return "", nil, err
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		// The model can still crop figures from the pages.
+		slog.Warn("couldn't extract the original images", "pages", fmt.Sprintf("%d-%d", first, last), "error", err)
+		clear(r.assets)
 	}
+	// Before the inventory, which leaves out originals that can't be shown.
+	assetSheets := r.assetSheets()
 	content := []openrouter.Part{
-		openrouter.TextPart(t.Prompts.Figures + "\nInventory:\n" + r.inventory()),
-		openrouter.PDFPart("pages.pdf", pdfData),
+		openrouter.TextPart(t.Prompts.PDF + "\n\nInventory:\n" + r.inventory()),
+		openrouter.PDFPart(fmt.Sprintf("pages-%d-%d.pdf", first, last), pdfData),
 	}
-	sheets, err := r.assetSheets()
-	if err != nil {
-		return "", nil, err
-	}
-	for _, s := range sheets {
+	for _, s := range assetSheets {
 		content = append(content, openrouter.TextPart("Labeled local asset contact sheet. Use the visible ID to match actual content."), s)
 	}
-	sheets, err = r.pageSheets(ctx)
-	if err != nil {
-		return "", nil, err
+	pageSheets, missing := r.pageSheets(ctx)
+	if ctx.Err() != nil {
+		return "", ctx.Err()
 	}
-	for _, s := range sheets {
-		content = append(content, openrouter.TextPart("Actual full-page previews, labeled by physical PDF page. These support figure discovery; native PDF remains the transcription source."), s)
+	for _, s := range pageSheets {
+		content = append(content, openrouter.TextPart("Actual full-page previews, labeled by physical PDF page. The native PDF remains the transcription source."), s)
+	}
+	if len(missing) > 0 {
+		content = append(content, openrouter.TextPart(fmt.Sprintf("Previews of pages %v couldn't be made; rendering or cropping them may fail too.", missing)))
 	}
 	messages := []openrouter.Message{{Role: "user", Content: content}}
 
-	turns := max(1, t.Config.FigureTurns)
+	turns := t.Config.Turns
 	for turn := range turns {
 		remaining := turns - turn
-		budget := fmt.Sprintf("You have %d response turns remaining including the final Markdown. Batch independent tools now. Reserve a final response after image feedback.", remaining)
+		budget := fmt.Sprintf("You have %d response turns remaining, including the final Markdown.", remaining)
 		var tools json.RawMessage = t.Prompts.Tools
 		if remaining == 1 {
-			budget += " This is the final turn. Return the complete Markdown using verified assets now."
+			budget += " This is the final turn. Return the complete Markdown now."
 			tools = nil
 		}
 		messages = append(messages, openrouter.Message{Role: "user", Content: budget})
-		c, err := t.AI.Complete(ctx, openrouter.Request{MaxTokens: figureMaxTokens, PDF: true, Messages: messages, Tools: tools})
+		c, err := t.AI.Complete(ctx, openrouter.Request{MaxTokens: textMaxTokens, PDF: true, Messages: messages, Tools: tools})
 		if err != nil {
-			return "", nil, err
+			return "", err
 		}
 		msg := c.Message
 		messages = append(messages, openrouter.Message{Role: "assistant", Content: msg.Content, ToolCalls: msg.ToolCalls})
 		if len(msg.ToolCalls) == 0 {
-			return unfence(msg.Text()), r.list(), nil
+			md := strings.TrimSpace(unfence(msg.Text()))
+			err := checkPages(md, r.pages)
+			if err == nil {
+				return md, nil
+			} else if remaining == 1 {
+				return "", fmt.Errorf("incomplete transcription: %w", err)
+			}
+			messages = append(messages, openrouter.Message{Role: "user", Content: fmt.Sprintf(
+				"That Markdown is incomplete: %v. Return the complete Markdown, with each of the %d pages under its own ## Page N heading, in order.", err, r.pages)})
+			continue
 		}
 		var previews []openrouter.Part
 		for _, call := range msg.ToolCalls {
-			meta, preview := r.execute(ctx, call)
+			meta, pixels := r.execute(ctx, call)
 			metaJSON, _ := json.Marshal(meta)
 			messages = append(messages, openrouter.Message{Role: "tool", ToolCallID: call.ID, Content: string(metaJSON)})
-			if preview != nil {
-				previews = append(previews, openrouter.TextPart("Actual local pixels for tool result "+call.ID+" "+string(metaJSON)), *preview)
+			if len(pixels) > 0 {
+				previews = append(previews, openrouter.TextPart("Actual local pixels for tool result "+call.ID+" "+string(metaJSON)))
+				previews = append(previews, pixels...)
 			}
 		}
 		if previews != nil {
-			previews = append(previews, openrouter.TextPart("Inspect the returned pixels. Continue, revise an incomplete crop if needed, then finish the requested Markdown."))
+			previews = append(previews, openrouter.TextPart("Inspect the returned pixels."))
 			messages = append(messages, openrouter.Message{Role: "user", Content: previews})
 		}
 	}
-	return "", nil, fmt.Errorf("no figures after %d turns", turns)
+	return "", fmt.Errorf("no Markdown after %d turns", turns)
 }
 
-func (r *figureRun) list() []*Asset {
+func (r *pagesRun) list() []*Asset {
 	var out []*Asset
 	for _, a := range r.assets {
 		out = append(out, a)
@@ -132,13 +150,13 @@ func (r *figureRun) list() []*Asset {
 }
 
 // newID numbers assets across the document, since its ranges' Markdown is joined.
-func (r *figureRun) newID(prefix string) (string, int64) {
+func (r *pagesRun) newID(prefix string) (string, int64) {
 	n := r.ids.Add(1)
 	return fmt.Sprintf("%s%d", prefix, n), n
 }
 
 // findOriginals extracts the range's bitmaps. One drawn on several pages, such as a logo, is one asset.
-func (r *figureRun) findOriginals(ctx context.Context) error {
+func (r *pagesRun) findOriginals(ctx context.Context) error {
 	dir := filepath.Join(r.dir, "originals")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -151,7 +169,8 @@ func (r *figureRun) findOriginals(ctx context.Context) error {
 	for _, p := range placed {
 		data, err := os.ReadFile(p.Path)
 		if err != nil {
-			return err
+			slog.Warn("leaving out an image that can't be read", "page", p.Page, "error", err)
+			continue
 		}
 		cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 		if err != nil || min(cfg.Width, cfg.Height) < minAssetSide || cfg.Width*cfg.Height > pdf.MaxImagePixels {
@@ -176,7 +195,7 @@ func (r *figureRun) findOriginals(ctx context.Context) error {
 }
 
 // inventory lists each page's originals, with where they're drawn and whether the page edge clips them.
-func (r *figureRun) inventory() string {
+func (r *pagesRun) inventory() string {
 	type item struct {
 		ID      string     `json:"id"`
 		Width   int        `json:"width"`
@@ -206,7 +225,7 @@ func (r *figureRun) inventory() string {
 }
 
 // sorted lists assets by page, then in the order they were found.
-func (r *figureRun) sorted() []*Asset {
+func (r *pagesRun) sorted() []*Asset {
 	out := r.list()
 	slices.SortFunc(out, func(a, b *Asset) int {
 		return cmp.Or(cmp.Compare(a.page, b.page), cmp.Compare(a.seq, b.seq))
@@ -214,58 +233,58 @@ func (r *figureRun) sorted() []*Asset {
 	return out
 }
 
-func (r *figureRun) assetSheets() ([]openrouter.Part, error) {
-	var parts []openrouter.Part
-	assets := r.sorted()
-	for start := 0; start < len(assets); start += 6 {
-		var tiles []tile
-		for _, a := range assets[start:min(start+6, len(assets))] {
-			img, err := decodeImageFile(a.Path)
-			if err != nil {
-				return nil, err
-			}
-			// Only the thumbnail is kept, not the decoded original.
-			tiles = append(tiles, tile{fit(img, 480, 300), []string{a.ID, fmt.Sprintf("page %d | %dx%d | %s", a.page, a.width, a.height, a.kind)}})
-		}
-		part, err := jpegPart(sheet(tiles, 2, 500, 340))
-		if err != nil {
-			return nil, err
-		}
-		parts = append(parts, part)
-	}
-	return parts, nil
-}
-
-func (r *figureRun) pageSheets(ctx context.Context) ([]openrouter.Part, error) {
-	pages := make([]int, r.pages)
-	for i := range pages {
-		pages[i] = i + 1
-	}
-	var parts []openrouter.Part
-	for start := 0; start < len(pages); start += 4 {
-		part, err := r.pagePreviews(ctx, pages[start:min(start+4, len(pages))], previewSize)
-		if err != nil {
-			return nil, err
-		}
-		parts = append(parts, part)
-	}
-	return parts, nil
-}
-
-// pagePreviews puts pages side by side, two to a row, each labeled with its number.
-func (r *figureRun) pagePreviews(ctx context.Context, pages []int, size int) (openrouter.Part, error) {
+// assetSheets shows the originals six to a sheet, leaving out any that can't be decoded.
+func (r *pagesRun) assetSheets() []openrouter.Part {
 	var tiles []tile
-	for _, n := range pages {
-		img, err := r.render(ctx, n, size)
+	for _, a := range r.sorted() {
+		img, err := decodeImageFile(a.Path)
 		if err != nil {
-			return openrouter.Part{}, err
+			slog.Warn("leaving out an image that can't be decoded", "asset", a.ID, "error", err)
+			delete(r.assets, a.ID)
+			continue
+		}
+		// Only the thumbnail is kept, not the decoded original.
+		tiles = append(tiles, tile{fit(img, 480, 300), []string{a.ID, fmt.Sprintf("page %d | %dx%d | %s", a.page, a.width, a.height, a.kind)}})
+	}
+	var parts []openrouter.Part
+	for start := 0; start < len(tiles); start += 6 {
+		part, err := jpegPart(sheet(tiles[start:min(start+6, len(tiles))], 2, 500, 340))
+		if err != nil {
+			slog.Warn("couldn't make a contact sheet", "error", err)
+			continue
+		}
+		parts = append(parts, part)
+	}
+	return parts
+}
+
+// pageSheets previews every page, four to a sheet, two to a row, each labeled
+// with its number. It returns the pages it couldn't render.
+func (r *pagesRun) pageSheets(ctx context.Context) ([]openrouter.Part, []int) {
+	var tiles []tile
+	var missing []int
+	for n := 1; n <= r.pages && ctx.Err() == nil; n++ {
+		img, err := r.render(ctx, n, previewSize)
+		if err != nil {
+			slog.Warn("couldn't preview a page", "page", n, "error", err)
+			missing = append(missing, n)
+			continue
 		}
 		tiles = append(tiles, tile{img, []string{fmt.Sprintf("PHYSICAL PDF PAGE %d", n)}})
 	}
-	return jpegPart(sheet(tiles, 2, 600, 500))
+	var parts []openrouter.Part
+	for start := 0; start < len(tiles); start += 4 {
+		part, err := jpegPart(sheet(tiles[start:min(start+4, len(tiles))], 2, 600, 500))
+		if err != nil {
+			slog.Warn("couldn't make a contact sheet", "error", err)
+			continue
+		}
+		parts = append(parts, part)
+	}
+	return parts, missing
 }
 
-func (r *figureRun) render(ctx context.Context, page, size int) (image.Image, error) {
+func (r *pagesRun) render(ctx context.Context, page, size int) (image.Image, error) {
 	path := filepath.Join(r.dir, fmt.Sprintf("page-%d-%d.png", page, size))
 	if err := r.t.Tool.Render(ctx, r.pdf, page, size, path); err != nil {
 		return nil, err
@@ -279,15 +298,15 @@ func jpegPart(img image.Image) (openrouter.Part, error) {
 }
 
 // execute runs a tool call, returning its result and any pixels to show the model.
-func (r *figureRun) execute(ctx context.Context, call openrouter.ToolCall) (map[string]any, *openrouter.Part) {
-	meta, preview, err := r.tool(ctx, call)
+func (r *pagesRun) execute(ctx context.Context, call openrouter.ToolCall) (map[string]any, []openrouter.Part) {
+	meta, pixels, err := r.tool(ctx, call)
 	if err != nil {
 		return map[string]any{"error": err.Error()}, nil
 	}
-	return meta, preview
+	return meta, pixels
 }
 
-func (r *figureRun) tool(ctx context.Context, call openrouter.ToolCall) (map[string]any, *openrouter.Part, error) {
+func (r *pagesRun) tool(ctx context.Context, call openrouter.ToolCall) (map[string]any, []openrouter.Part, error) {
 	var args struct {
 		AssetID string    `json:"asset_id"`
 		Page    int       `json:"page"`
@@ -304,15 +323,6 @@ func (r *figureRun) tool(ctx context.Context, call openrouter.ToolCall) (map[str
 		return nil
 	}
 	switch call.Function.Name {
-	case "record_figure_plan":
-		// Asking for a plan makes the model consider every page. It's kept to debug missed figures.
-		r.plans++
-		path := filepath.Join(r.dir, fmt.Sprintf("figure-plan-%d.json", r.plans))
-		if err := os.WriteFile(path, []byte(call.Function.Arguments), 0o600); err != nil {
-			return nil, nil, err
-		}
-		return map[string]any{"recorded": true}, nil, nil
-
 	case "inspect_asset":
 		a := r.assets[args.AssetID]
 		if a == nil {
@@ -323,7 +333,7 @@ func (r *figureRun) tool(ctx context.Context, call openrouter.ToolCall) (map[str
 			return nil, nil, err
 		}
 		part, err := jpegPart(fit(img, 1600, 1600))
-		return map[string]any{"asset_id": a.ID, "kind": a.kind, "size": []int{a.width, a.height}}, &part, err
+		return map[string]any{"asset_id": a.ID, "kind": a.kind, "size": []int{a.width, a.height}}, []openrouter.Part{part}, err
 
 	case "render_pages":
 		if len(args.Pages) < 1 || len(args.Pages) > 8 {
@@ -334,8 +344,20 @@ func (r *figureRun) tool(ctx context.Context, call openrouter.ToolCall) (map[str
 				return nil, nil, err
 			}
 		}
-		part, err := r.pagePreviews(ctx, args.Pages, inspectSize)
-		return map[string]any{"pages": args.Pages, "kind": "page_previews"}, &part, err
+		// Each page is its own image, so it's seen at the larger size.
+		var parts []openrouter.Part
+		for _, n := range args.Pages {
+			img, err := r.render(ctx, n, inspectSize)
+			if err != nil {
+				return nil, nil, err
+			}
+			part, err := jpegPart(img)
+			if err != nil {
+				return nil, nil, err
+			}
+			parts = append(parts, openrouter.TextPart(fmt.Sprintf("PHYSICAL PDF PAGE %d", n)), part)
+		}
+		return map[string]any{"pages": args.Pages, "kind": "page_renders"}, parts, nil
 
 	case "crop":
 		if len(args.BBox) != 4 {
@@ -394,8 +416,9 @@ func (r *figureRun) tool(ctx context.Context, call openrouter.ToolCall) (map[str
 		b := img.Bounds()
 		r.assets[id] = &Asset{ID: id, seq: seq, page: page, Path: path, ContentType: "image/png", width: b.Dx(), height: b.Dy(), kind: "crop"}
 		cropped = true
+		r.cropped++
 		part, err := jpegPart(fit(img, 1600, 1600))
-		return map[string]any{"asset_id": id, "kind": "crop", "bbox_normalized": box, "size": []int{b.Dx(), b.Dy()}}, &part, err
+		return map[string]any{"asset_id": id, "kind": "crop", "bbox_normalized": box, "size": []int{b.Dx(), b.Dy()}}, []openrouter.Part{part}, err
 	}
 	return nil, nil, fmt.Errorf("no tool %q", call.Function.Name)
 }

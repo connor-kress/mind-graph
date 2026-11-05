@@ -1,11 +1,10 @@
 package transcribe
 
 import (
-	"maps"
+	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
-	"strings"
 )
 
 var (
@@ -33,56 +32,6 @@ func renumber(md string, offset int) string {
 	})
 }
 
-// pageSections maps each page number to the text under its "## Page N" heading.
-func pageSections(md string) map[int]string {
-	sections := map[int]string{}
-	locs := pageHeading.FindAllStringSubmatchIndex(md, -1)
-	for i, loc := range locs {
-		n, _ := strconv.Atoi(md[loc[2]:loc[3]])
-		end := len(md)
-		if i+1 < len(locs) {
-			end = locs[i+1][0]
-		}
-		sections[n] += strings.TrimSpace(md[loc[1]:end])
-	}
-	return sections
-}
-
-// mergeFigures adds each page's figures after that page's text, which stays as transcribed.
-// Figures for pages the text doesn't have are added at the end.
-func mergeFigures(text, figures string) string {
-	extra := pageSections(figures)
-	if len(extra) == 0 {
-		return text
-	}
-	var b strings.Builder
-	locs := pageHeading.FindAllStringSubmatchIndex(text, -1)
-	if len(locs) == 0 {
-		b.WriteString(strings.TrimRight(text, "\n"))
-	} else {
-		b.WriteString(text[:locs[0][0]])
-	}
-	for i, loc := range locs {
-		end := len(text)
-		if i+1 < len(locs) {
-			end = locs[i+1][0]
-		}
-		b.WriteString(strings.TrimRight(text[loc[0]:end], "\n"))
-		n, _ := strconv.Atoi(text[loc[2]:loc[3]])
-		if f := extra[n]; f != "" {
-			b.WriteString("\n\n" + f)
-		}
-		delete(extra, n)
-		b.WriteString("\n\n")
-	}
-	for _, n := range slices.Sorted(maps.Keys(extra)) {
-		if f := extra[n]; f != "" {
-			b.WriteString("## Page " + strconv.Itoa(n) + "\n\n" + f + "\n\n")
-		}
-	}
-	return strings.TrimSpace(b.String()) + "\n"
-}
-
 // linkAssets keeps image links to known assets, removing any others, and
 // returns the assets linked to, in order of first use.
 func linkAssets(md string, known func(id string) bool) (string, []string) {
@@ -108,4 +57,29 @@ func LocalAssets(md string, path func(id string) string) string {
 		m := assetImage.FindStringSubmatch(link)
 		return "![" + m[1] + "](" + path(m[2]) + ")"
 	})
+}
+
+// checkPages reports how md's "## Page N" headings differ from pages 1 to n,
+// each once and in order.
+func checkPages(md string, n int) error {
+	var got []int
+	for _, m := range pageHeading.FindAllStringSubmatch(md, -1) {
+		p, _ := strconv.Atoi(m[1])
+		got = append(got, p)
+	}
+	var missing []int
+	for p := 1; p <= n; p++ {
+		if !slices.Contains(got, p) {
+			missing = append(missing, p)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("pages %v are missing", missing)
+	}
+	for i, p := range got {
+		if i >= n || p != i+1 {
+			return fmt.Errorf("the pages are repeated or out of order")
+		}
+	}
+	return nil
 }

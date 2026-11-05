@@ -14,12 +14,9 @@ The runner asks the Convex deployment for work over signed HTTP endpoints (`conv
 
 If the heartbeats stop, Convex puts the source back in the queue when the lease runs out, deleting what the claim uploaded, and fails it after three tries. The runner stops working on a source if it can't renew the lease in time. Each request is signed with HMAC-SHA256 over its time, method, path with query, and body, using a secret shared with the deployment's `RUNNER_SECRET`. Each deployment has its own secret.
 
-A PDF is transcribed in two passes:
+A PDF is transcribed in ranges of 25 pages, each in one conversation with the model. It gets the native PDF, its original bitmaps with where each page draws them, and page previews, with tools to inspect assets, render pages and crop regions, which return real pixels. It decides how to use them, then returns the range's Markdown, with each page under a `## Page N` heading and its figures linked as `![caption](asset:ID)`. A response missing pages is sent back for the rest, and a range whose response is cut off is split in half and started again. If the originals can't be extracted, the model can still crop figures from the pages. A range that fails otherwise fails the file, so a note is never saved with pages missing.
 
-1. **Text:** the model reads the native PDF in ranges of 25 pages and transcribes each page under a `## Page N` heading. A range whose response is cut off is split in half.
-2. **Figures:** the model gets the range again, with its original bitmaps, page previews and tools to inspect assets, render pages and crop regions, which return real pixels. It links each page's figures as `![caption](asset:ID)`, added after that page's text. If this pass fails, the text is kept on its own.
-
-Word and PowerPoint files are read as XML, so only their text is transcribed. Up to 75 pages or slides are transcribed.
+Word and PowerPoint files are read as XML, so only their text is transcribed: up to 75 slides, or 300,000 characters.
 
 ## Code
 
@@ -28,7 +25,7 @@ Word and PowerPoint files are read as XML, so only their text is transcribed. Up
 - `config` reads the settings from the environment and `.env.local`;
 - `worker` claims sources, renews their leases, and uploads the results;
 - `convex` signs and sends the requests to Convex;
-- `transcribe` turns a file into Markdown and images, with the prompts in `transcribe/prompts/`;
+- `transcribe` turns a file into Markdown and images, with a transcriber and prompt for each kind of file in `transcribe/prompts/`;
 - `openrouter` sends the model requests;
 - `pdf` splits, renders and extracts images from PDFs, using Poppler;
 - `office` reads the text of Word and PowerPoint files.
@@ -44,7 +41,7 @@ pnpm exec convex env set --deployment dev RUNNER_SECRET <the same secret>  # Onc
 go run .
 ```
 
-It asks for work every 5 seconds and exits after 30 minutes without any. Upload a PDF in the app to see it work.
+With the example settings, it asks for work every 5 seconds and exits after 30 minutes without any. Upload a PDF in the app to see it work.
 
 To tune the prompts, transcribe a file locally, without Convex:
 

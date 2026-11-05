@@ -73,7 +73,7 @@ var (
 
 // formatUnits has the model turn slides or paragraphs into Markdown, a chunk at a time.
 func formatUnits(ctx context.Context, ai *openrouter.Client, cfg config.Config, prompt string, units []string) (string, error) {
-	chunks := chunkUnits(units, cfg.TextRangePages)
+	chunks := chunkUnits(units, cfg.RangePages)
 	if len(chunks) == 0 {
 		return "", UserError("This file has no text to transcribe.")
 	}

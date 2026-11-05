@@ -24,22 +24,6 @@ func TestRenumber(t *testing.T) {
 	}
 }
 
-func TestMergeFigures(t *testing.T) {
-	text := "## Page 1\n\nIntro.\n\n## Page 2\n\nBody.\n"
-	figures := "## Page 2\n\n![Cell](asset:img1)\n\n## Page 3\n\n![Late](asset:img2)\n## Page 1\n"
-	got := mergeFigures(text, figures)
-	want := "## Page 1\n\nIntro.\n\n## Page 2\n\nBody.\n\n![Cell](asset:img1)\n\n## Page 3\n\n![Late](asset:img2)\n"
-	if got != want {
-		t.Errorf("mergeFigures =\n%q\nwant\n%q", got, want)
-	}
-	if got := mergeFigures(text, "## Page 0\n\nOdd."); got != text+"\n## Page 0\n\nOdd.\n" {
-		t.Errorf("a page the text doesn't have should go at the end: %q", got)
-	}
-	if got := mergeFigures(text, "No pages here."); got != text {
-		t.Errorf("figures without pages should be ignored: %q", got)
-	}
-}
-
 func TestLinkAssets(t *testing.T) {
 	md := `![A](asset:img1) ![B](asset:missing) ![A again](asset:img1 "title") ![C](asset:crop2) ![D](https://x.test/d.png)`
 	got, used := linkAssets(md, func(id string) bool { return id != "missing" })
