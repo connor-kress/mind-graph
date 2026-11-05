@@ -95,6 +95,8 @@ func (r *pagesRun) run(ctx context.Context, source string, first, last int) (str
 	}
 	messages := []openrouter.Message{{Role: "user", Content: content}}
 
+	// The latest answer with every page, kept while the model fixes its image links.
+	var draft string
 	turns := t.Config.Turns
 	for turn := range turns {
 		remaining := turns - turn
@@ -107,6 +109,10 @@ func (r *pagesRun) run(ctx context.Context, source string, first, last int) (str
 		messages = append(messages, openrouter.Message{Role: "user", Content: budget})
 		c, err := t.AI.Complete(ctx, openrouter.Request{MaxTokens: textMaxTokens, PDF: true, Messages: messages, Tools: tools})
 		if err != nil {
+			if draft != "" {
+				slog.Warn("keeping an answer with broken image links", "error", err)
+				return draft, nil
+			}
 			return "", err
 		}
 		msg := c.Message
@@ -115,12 +121,16 @@ func (r *pagesRun) run(ctx context.Context, source string, first, last int) (str
 			md := strings.TrimSpace(unfence(msg.Text()))
 			err := checkPages(md, r.pages)
 			if err == nil {
-				return md, nil
-			} else if remaining == 1 {
+				if err = r.checkLinks(md); err == nil {
+					return md, nil
+				}
+				draft = md
+			}
+			if remaining == 1 && draft == "" {
 				return "", fmt.Errorf("incomplete transcription: %w", err)
 			}
 			messages = append(messages, openrouter.Message{Role: "user", Content: fmt.Sprintf(
-				"That Markdown is incomplete: %v. Return the complete Markdown, with each of the %d pages under its own ## Page N heading, in order.", err, r.pages)})
+				"That Markdown can't be used: %v. Return the complete Markdown, with each of the %d pages under its own ## Page N heading, in order.", err, r.pages)})
 			continue
 		}
 		var previews []openrouter.Part
@@ -138,7 +148,28 @@ func (r *pagesRun) run(ctx context.Context, source string, first, last int) (str
 			messages = append(messages, openrouter.Message{Role: "user", Content: previews})
 		}
 	}
+	// Links to images that still don't exist only lose those images.
+	if draft != "" {
+		return draft, nil
+	}
 	return "", fmt.Errorf("no Markdown after %d turns", turns)
+}
+
+// checkLinks reports links to images that don't exist, such as crops the model
+// planned and never made.
+func (r *pagesRun) checkLinks(md string) error {
+	var unknown []string
+	linkAssets(md, func(id string) bool {
+		if r.assets[id] != nil {
+			return true
+		}
+		unknown = append(unknown, id)
+		return false
+	})
+	if len(unknown) > 0 {
+		return fmt.Errorf("it links to images that don't exist, %v. Crop those figures and use the IDs returned if you still can; otherwise link the closest original or remove the link", unknown)
+	}
+	return nil
 }
 
 func (r *pagesRun) list() []*Asset {

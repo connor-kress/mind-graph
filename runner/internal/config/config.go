@@ -86,8 +86,8 @@ func Load(envFile string) (Config, error) {
 	}{
 		{"MAX_PAGES", pageLimit, &c.MaxPages},
 		{"RANGE_PAGES", 25, &c.RangePages},
-		{"TURNS", 8, &c.Turns},
-		{"MAX_CROPS", 12, &c.MaxCrops},
+		{"TURNS", 16, &c.Turns},
+		{"MAX_CROPS", 40, &c.MaxCrops},
 		{"PARALLEL", 3, &c.Parallel},
 	}
 	for _, i := range ints {

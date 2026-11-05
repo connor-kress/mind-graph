@@ -10,7 +10,8 @@ import (
 var (
 	fence       = regexp.MustCompile("(?s)^\\s*```(?:markdown|md)?\\s*\n(.*?)\n```\\s*$")
 	pageHeading = regexp.MustCompile(`(?m)^## Page (\d+)[ \t]*$`)
-	assetImage  = regexp.MustCompile(`!\[([^\]]*)\]\(asset:([A-Za-z0-9_-]+)(?:\s+"[^"]*")?\)`)
+	assetImage  = regexp.MustCompile(`!\[([^\]]*)\]\(asset:([^\s)]+)(?:\s+"[^"]*")?\)`)
+	bareImage   = regexp.MustCompile(`(!\[[^\]]*\]\()([^\s):]+(?:\s+"[^"]*")?\))`)
 )
 
 // unfence removes a code fence around the whole response, which the prompts ask the model not to add.
@@ -33,11 +34,13 @@ func renumber(md string, offset int) string {
 }
 
 // linkAssets keeps image links to known assets, removing any others, and
-// returns the assets linked to, in order of first use.
+// returns the assets linked to, in order of first use. A link with no scheme is
+// treated as an asset's, since the model can leave out the prefix and nothing
+// else would resolve in a note.
 func linkAssets(md string, known func(id string) bool) (string, []string) {
 	var used []string
 	seen := map[string]bool{}
-	out := assetImage.ReplaceAllStringFunc(md, func(link string) string {
+	out := assetImage.ReplaceAllStringFunc(bareImage.ReplaceAllString(md, "${1}asset:$2"), func(link string) string {
 		id := assetImage.FindStringSubmatch(link)[2]
 		if !known(id) {
 			return ""
@@ -67,6 +70,9 @@ func checkPages(md string, n int) error {
 		p, _ := strconv.Atoi(m[1])
 		got = append(got, p)
 	}
+	if len(got) > n {
+		return fmt.Errorf("it has %d page headings, but only %d physical pages exist, so a page's slides all belong under its one heading", len(got), n)
+	}
 	var missing []int
 	for p := 1; p <= n; p++ {
 		if !slices.Contains(got, p) {
@@ -77,7 +83,7 @@ func checkPages(md string, n int) error {
 		return fmt.Errorf("pages %v are missing", missing)
 	}
 	for i, p := range got {
-		if i >= n || p != i+1 {
+		if p != i+1 {
 			return fmt.Errorf("the pages are repeated or out of order")
 		}
 	}
