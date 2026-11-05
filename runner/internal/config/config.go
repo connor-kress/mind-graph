@@ -36,15 +36,13 @@ type Config struct {
 	PromptsDir string
 
 	MaxPages int
-	// Pages sent to the model per text request.
-	TextRangePages int
-	// Whether to add figures after transcribing the text.
-	Figures bool
-	// Responses per figure pass, including the final one.
-	FigureTurns int
-	// Crops per document, to limit the figure pass's spending.
+	// Pages per conversation with the model, or slides per request.
+	RangePages int
+	// Responses per conversation about a PDF's pages, including the final one.
+	Turns int
+	// Crops per document, to limit what they cost.
 	MaxCrops int
-	// Text requests in flight at once, per document.
+	// Requests in flight at once, per document.
 	Parallel int
 }
 
@@ -87,8 +85,8 @@ func Load(envFile string) (Config, error) {
 		dst  *int
 	}{
 		{"MAX_PAGES", pageLimit, &c.MaxPages},
-		{"TEXT_RANGE_PAGES", 25, &c.TextRangePages},
-		{"FIGURE_TURNS", 8, &c.FigureTurns},
+		{"RANGE_PAGES", 25, &c.RangePages},
+		{"TURNS", 8, &c.Turns},
 		{"MAX_CROPS", 12, &c.MaxCrops},
 		{"PARALLEL", 3, &c.Parallel},
 	}
@@ -101,11 +99,8 @@ func Load(envFile string) (Config, error) {
 	if c.MaxPages < 1 || c.MaxPages > pageLimit {
 		return c, fmt.Errorf("MAX_PAGES must be from 1 to %d", pageLimit)
 	}
-	if c.TextRangePages < 1 || c.Parallel < 1 {
-		return c, fmt.Errorf("TEXT_RANGE_PAGES and PARALLEL must be at least 1")
-	}
-	if c.Figures, err = strconv.ParseBool(env("FIGURES", "true")); err != nil {
-		return c, fmt.Errorf("FIGURES: expected true or false")
+	if c.RangePages < 1 || c.Turns < 1 || c.Parallel < 1 {
+		return c, fmt.Errorf("RANGE_PAGES, TURNS and PARALLEL must be at least 1")
 	}
 	if c.OpenRouterKey == "" {
 		return c, fmt.Errorf("OPENROUTER_API_KEY is not set")

@@ -30,7 +30,7 @@ type Tool interface {
 }
 
 // Limits on the bitmaps in a range for them to be extracted, so extraction
-// takes bounded memory and disk, and the figure pass a bounded request.
+// takes bounded memory and disk, and the model a bounded request.
 const (
 	MaxImagePixels = 40_000_000
 	maxRangeImages = 300

@@ -14,11 +14,9 @@ var builtInPrompts embed.FS
 
 // Prompts are built in, but any file in PROMPTS_DIR replaces its built-in copy.
 type Prompts struct {
-	// Transcribes a PDF's text, page by page.
-	Text string
-	// Adds figures to a PDF's transcribed pages, with Tools.
-	Figures string
-	Tools   json.RawMessage
+	// Transcribes a PDF's pages, text and figures, with Tools.
+	PDF   string
+	Tools json.RawMessage
 	// Formats text extracted from a presentation or a Word document.
 	Slides   string
 	Document string
@@ -40,8 +38,7 @@ func LoadPrompts(dir string) (Prompts, error) {
 	var p Prompts
 	var tools string
 	for name, dst := range map[string]*string{
-		"text.txt":     &p.Text,
-		"figures.txt":  &p.Figures,
+		"pdf.txt":      &p.PDF,
 		"tools.json":   &tools,
 		"slides.txt":   &p.Slides,
 		"document.txt": &p.Document,

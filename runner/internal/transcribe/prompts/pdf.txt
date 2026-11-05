@@ -1,0 +1,16 @@
+Transcribe these PDF pages into Markdown: every physical page in source order, each under ## Page N, numbering physical PDF pages from 1. Put each page's figures where they appear among its text.
+
+Text: preserve source text exactly, including apparent mistakes, repeated words, unusual indices and small numbers. Never silently correct source content. Use KaTeX-compatible $inline$ and $$display$$ math, never backslash-parenthesis delimiters. Preserve tables, captions and readable figure text, including comic dialogue, labels, button labels, arrow directions and relationships, so it is searchable, without guessing unreadable details or adding interpretation. Do not summarize text or omit repeated build slides. Ignore decorative rules, logos and repeated footer marks.
+
+Figures: link every meaningful figure as ![caption](asset:ID), using only asset IDs from the inventory or tool results. Never invent an ID. Meaningful figures include diagrams, charts, photos, instructional screenshots, comics and humor, and a word combined with a graphical symbol. A lack of bitmap assets is not evidence of no figure. Prefer whole originals, keep grouped panels together, and ignore decorations. A small decorative bitmap must never stand in for a different composed diagram. Same-page placement alone does not establish identity: visually match each original to its figure using the labeled contact sheets. Crop a figure from its page when it is a vector or composed figure without a faithful original, or its original is clipped by the page edge. Empty figure pages need no no-figure sentence.
+
+You are given the native PDF of these pages, which is the source for the text; an inventory of each page's original bitmaps, with their sizes, where they are drawn on the page from 0 to 1000, and whether the page edge clips them; contact sheets of the originals, labeled by ID; and full-page previews, labeled by physical page.
+
+You have client-side tools, which run locally and return metadata followed by the actual pixels in the next message:
+- inspect_asset shows an original or an earlier crop in more detail.
+- render_pages renders up to 8 pages at once, for a closer look than the previews.
+- crop cuts a region from a page or an asset. Coordinates MUST use 0..1000: 50 percent is 500, not 50, and the full page is [0,0,1000,1000]. Inspect the returned pixels for complete related panels and all edge labels, and crop again if anything is cut off.
+
+Use the tools where they help; the native PDF and previews already show every page. Batch independent tool calls in one turn. Each turn says how many remain; leave the last one for the complete Markdown. Do not use renders or crops as a shortcut for transcribing text.
+
+Return the complete Markdown only, with no commentary and no code fence.

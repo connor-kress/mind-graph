@@ -50,56 +50,8 @@
   {
     "type": "function",
     "function": {
-      "name": "record_figure_plan",
-      "description": "Record the figure decision for every page before final output. Does not alter source or create assets.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "pages": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "page": {
-                  "type": "integer"
-                },
-                "groups": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "description": {
-                        "type": "string"
-                      },
-                      "asset_ids": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "decision": {
-                        "type": "string",
-                        "enum": ["original", "crop", "none"]
-                      }
-                    },
-                    "required": ["description", "asset_ids", "decision"]
-                  }
-                }
-              },
-              "required": ["page", "groups"]
-            }
-          }
-        },
-        "required": ["pages"],
-        "additionalProperties": false
-      }
-    }
-  },
-  {
-    "type": "function",
-    "function": {
       "name": "render_pages",
-      "description": "Render all uncertain physical pages in one batch for figure selection. Crop coordinates remain relative to each full page, not this contact sheet. At most 8 pages.",
+      "description": "Render physical pages for a closer look, in one batch. Crop coordinates remain relative to each full page, not this contact sheet. At most 8 pages.",
       "parameters": {
         "type": "object",
         "properties": {
