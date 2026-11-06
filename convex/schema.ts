@@ -69,6 +69,12 @@ export default defineSchema({
     kind: sourceKind,
     size: v.number(),
     status: sourceStatus,
+    /**
+     * Who asked for the file to be transcribed, by uploading it or trying it
+     * again, whose limit on files at once it counts against. Older sources don't
+     * say, and share one limit.
+     */
+    queuedBy: v.optional(v.string()),
     /** The note as Markdown, once it has been transcribed. */
     markdownId: v.optional(v.id("_storage")),
     /** Why transcription failed. */
@@ -81,7 +87,7 @@ export default defineSchema({
     lease: v.optional(v.object({ token: v.string(), expiresAt: v.number() })),
   })
     .index("by_project", ["projectId"])
-    .index("by_status", ["status"]),
+    .index("by_status_queued_by", ["status", "queuedBy"]),
 
   // A file the document runner uploaded for a claim's result, until the claim ends.
   runnerUploads: defineTable({

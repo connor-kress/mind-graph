@@ -53,29 +53,29 @@ func main() {
 	}
 }
 
-func setup(envFile string) (config.Config, transcribe.ByKind, *openrouter.Client, error) {
+func setup(envFile string) (config.Config, transcribe.ByKind, error) {
 	cfg, err := config.Load(envFile)
 	if err != nil {
-		return cfg, nil, nil, err
+		return cfg, nil, err
 	}
 	prompts, err := transcribe.LoadPrompts(cfg.PromptsDir)
 	if err != nil {
-		return cfg, nil, nil, err
+		return cfg, nil, err
 	}
 	tool, err := pdf.New(cfg.PDFTool)
 	if err != nil {
-		return cfg, nil, nil, err
+		return cfg, nil, err
 	}
 	ai := &openrouter.Client{URL: cfg.OpenRouterURL, Key: cfg.OpenRouterKey, Model: cfg.OpenRouterModel, HTTP: &http.Client{}}
 	return cfg, transcribe.ByKind{
 		"pdf":  &transcribe.PDF{Config: cfg, AI: ai, Tool: tool, Prompts: prompts},
 		"docx": &transcribe.Word{Config: cfg, AI: ai, Prompt: prompts.Document},
 		"pptx": &transcribe.Slides{Config: cfg, AI: ai, Prompt: prompts.Slides},
-	}, ai, nil
+	}, nil
 }
 
 func runWorker(ctx context.Context, envFile string) error {
-	cfg, t, ai, err := setup(envFile)
+	cfg, t, err := setup(envFile)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func runWorker(ctx context.Context, envFile string) error {
 	}
 	client := &convex.Client{SiteURL: cfg.ConvexSiteURL, Secret: cfg.RunnerSecret, HTTP: &http.Client{Timeout: 2 * time.Minute}}
 	slog.Info("asking for work", "convex", cfg.ConvexSiteURL, "every", cfg.PollInterval, "model", cfg.OpenRouterModel)
-	w := &worker.Worker{Convex: client, Transcriber: t, Cost: ai.Cost, Config: cfg}
+	w := &worker.Worker{Convex: client, Transcriber: t, Config: cfg}
 	return w.Run(ctx)
 }
 
@@ -97,7 +97,7 @@ func transcribeFile(ctx context.Context, envFile string, args []string) error {
 		return fmt.Errorf("usage: runner transcribe [-o DIR] FILE")
 	}
 	path := flags.Arg(0)
-	_, t, ai, err := setup(envFile)
+	_, t, err := setup(envFile)
 	if err != nil {
 		return err
 	}
@@ -118,6 +118,7 @@ func transcribeFile(ctx context.Context, envFile string, args []string) error {
 	}
 
 	started := time.Now()
+	ctx, spent := openrouter.WithSpending(ctx)
 	result, err := t.Transcribe(ctx, filepath.Base(path), kind, data, work)
 	if err != nil {
 		return err
@@ -143,7 +144,7 @@ func transcribeFile(ctx context.Context, envFile string, args []string) error {
 		return err
 	}
 	slog.Info("transcribed", "out", *out, "pages", result.Pages, "images", len(result.Assets),
-		"seconds", time.Since(started).Round(time.Second).Seconds(), "cost_usd", ai.Cost())
+		"seconds", time.Since(started).Round(time.Second).Seconds(), "cost_usd", spent.USD())
 	return nil
 }
 

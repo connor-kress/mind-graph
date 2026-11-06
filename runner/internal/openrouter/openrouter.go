@@ -21,9 +21,27 @@ type Client struct {
 	Key   string
 	Model string
 	HTTP  *http.Client
+}
 
-	mu   sync.Mutex
-	cost float64
+// Spending adds up what a context's requests cost, as OpenRouter reports it.
+type Spending struct {
+	mu  sync.Mutex
+	usd float64
+}
+
+type spendingKey struct{}
+
+// WithSpending returns a context whose requests add to the returned Spending.
+func WithSpending(ctx context.Context) (context.Context, *Spending) {
+	s := &Spending{}
+	return context.WithValue(ctx, spendingKey{}, s), s
+}
+
+// USD is what the requests so far have cost, in US dollars.
+func (s *Spending) USD() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.usd
 }
 
 type Message struct {
@@ -112,6 +130,10 @@ func (o *Client) Complete(ctx context.Context, r Request) (Completion, error) {
 	var last error
 	for attempt, wait := range []time.Duration{0, 5 * time.Second, 30 * time.Second} {
 		if attempt > 0 {
+			// The job is over, rather than this request having timed out.
+			if ctx.Err() != nil {
+				return Completion{}, last
+			}
 			slog.Warn("retrying OpenRouter", "error", last, "in", wait)
 			select {
 			case <-ctx.Done():
@@ -163,9 +185,11 @@ func (o *Client) once(ctx context.Context, body []byte) (c Completion, retry boo
 	if err := json.Unmarshal(data, &out); err != nil {
 		return c, resp.StatusCode >= 500, fmt.Errorf("OpenRouter: %s: unexpected response", resp.Status)
 	}
-	o.mu.Lock()
-	o.cost += out.Usage.Cost
-	o.mu.Unlock()
+	if s, ok := ctx.Value(spendingKey{}).(*Spending); ok {
+		s.mu.Lock()
+		s.usd += out.Usage.Cost
+		s.mu.Unlock()
+	}
 	if out.Error != nil || resp.StatusCode != http.StatusOK || len(out.Choices) == 0 {
 		message := resp.Status
 		if out.Error != nil {
@@ -184,13 +208,6 @@ func (o *Client) once(ctx context.Context, body []byte) (c Completion, retry boo
 	}
 	// E.g. a content filter or a provider error, with whatever was produced before it.
 	return c, false, fmt.Errorf("OpenRouter: the response ended with %q", choice.FinishReason)
-}
-
-// Cost is what the requests so far have cost, in US dollars, as OpenRouter reports it.
-func (o *Client) Cost() float64 {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.cost
 }
 
 // Text is a message's content as text.

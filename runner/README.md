@@ -6,7 +6,7 @@ Transcribes source notes uploaded as PDF, Word or PowerPoint files into Markdown
 
 The runner asks the Convex deployment for work over signed HTTP endpoints (`convex/runner.ts`). Convex never needs to reach it, so it runs the same way on a laptop or a server:
 
-- **claim** takes the oldest queued source, with a link to download it, for a two-minute lease;
+- **claim** takes the oldest queued source of a user with fewer than three running, with a link to download it, for a two-minute lease;
 - **heartbeat** renews the lease while the runner works;
 - **upload** stores one file of the result, which only that claim can use;
 - **complete** saves the Markdown and its images, replacing any earlier ones, and deletes any uploads it didn't use;

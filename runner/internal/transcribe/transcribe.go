@@ -65,9 +65,9 @@ type placement struct {
 // Output tokens per text request.
 const textMaxTokens = 32000
 
-// forEach runs fn for 0 to n-1, at most parallel at once. The first error
+// ForEach runs fn for 0 to n-1, at most parallel at once. The first error
 // cancels the rest, and is returned.
-func forEach(ctx context.Context, n, parallel int, fn func(ctx context.Context, i int) error) error {
+func ForEach(ctx context.Context, n, parallel int, fn func(ctx context.Context, i int) error) error {
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	limit := make(chan struct{}, parallel)

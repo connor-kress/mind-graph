@@ -2,7 +2,7 @@ import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
-import { LEASE_MS, MAX_ATTEMPTS, sign } from "../convex/runner";
+import { LEASE_MS, MAX_ATTEMPTS, MAX_JOBS_PER_USER, sign } from "../convex/runner";
 import schema from "../convex/schema";
 
 const modules = import.meta.glob("../convex/**/*.ts");
@@ -28,12 +28,20 @@ async function fixture() {
 type T = Awaited<ReturnType<typeof fixture>>["t"];
 
 /** Adds a source as an upload would, without sending the bytes over HTTP. */
-function addSource(t: T, projectId: Id<"projects">, name: string, text = "%PDF-1.7") {
+function addSource(
+  t: T,
+  projectId: Id<"projects">,
+  name: string,
+  text = "%PDF-1.7",
+  queuedBy?: string,
+) {
   return t.run(async (ctx) => {
     const storageId = await ctx.storage.store(new Blob([text]));
     await ctx.runMutation(internal.sources.attach, { projectId, storageId, name, title: "" });
     const sources = await ctx.db.query("sources").collect();
-    return sources.find((source) => source.storageId === storageId)!._id;
+    const { _id } = sources.find((source) => source.storageId === storageId)!;
+    await ctx.db.patch(_id, { queuedBy });
+    return _id;
   });
 }
 
@@ -171,6 +179,140 @@ describe("claiming", () => {
     expect((await source(t, first))?.status).toBe("processing");
     expect((await claim(t))?.sourceId).toBe(second);
     expect(await claim(t)).toBeNull();
+  });
+
+  test("runs a limited number of each user's files at once, without holding up others", async () => {
+    const { t, projectId } = await fixture();
+    const alices = [];
+    for (let i = 0; i <= MAX_JOBS_PER_USER; i++) {
+      alices.push(await addSource(t, projectId, `Alice ${i}.pdf`, undefined, "alice"));
+    }
+    const bobs = await addSource(t, projectId, "Bob.pdf", undefined, "bob");
+
+    const jobs = [];
+    for (let i = 0; i < MAX_JOBS_PER_USER; i++) {
+      const job = (await claim(t))!;
+      expect(job.sourceId).toBe(alices[i]);
+      jobs.push(job);
+    }
+    // Alice's next one is older, but she's at her limit.
+    expect((await claim(t))?.sourceId).toBe(bobs);
+    expect(await claim(t)).toBeNull();
+
+    // Finishing one makes room for her next.
+    await call(t, "/runner/fail", {
+      sourceId: jobs[0].sourceId,
+      token: jobs[0].token,
+      error: "No",
+    });
+    expect((await claim(t))?.sourceId).toBe(alices[MAX_JOBS_PER_USER]);
+  });
+
+  test("doesn't count a claim that ran out against its user", async () => {
+    const { t, projectId } = await fixture();
+    const sources = [];
+    for (let i = 0; i <= MAX_JOBS_PER_USER; i++) {
+      sources.push(await addSource(t, projectId, `${i}.pdf`, undefined, "alice"));
+    }
+    for (let i = 0; i < MAX_JOBS_PER_USER; i++) await claim(t);
+    expect(await claim(t)).toBeNull();
+    vi.advanceTimersByTime(LEASE_MS + 1);
+    // All of them, in the order they were queued, though the leases ran out at once.
+    expect((await claim(t))?.sourceId).toBe(sources[0]);
+  });
+
+  test("takes the oldest file across users, whatever their IDs", async () => {
+    const { t, projectId } = await fixture();
+    const zed = await addSource(t, projectId, "Zed.pdf", undefined, "zed");
+    const amy = await addSource(t, projectId, "Amy.pdf", undefined, "amy");
+    const old = await addSource(t, projectId, "Old.pdf");
+    expect((await claim(t))?.sourceId).toBe(zed);
+    expect((await claim(t))?.sourceId).toBe(amy);
+    expect((await claim(t))?.sourceId).toBe(old);
+    expect(await claim(t)).toBeNull();
+  });
+
+  test("counts older files without an uploader together", async () => {
+    const { t, projectId } = await fixture();
+    for (let i = 0; i <= MAX_JOBS_PER_USER; i++) await addSource(t, projectId, `${i}.pdf`);
+    for (let i = 0; i < MAX_JOBS_PER_USER; i++) expect(await claim(t)).not.toBeNull();
+    expect(await claim(t)).toBeNull();
+  });
+
+  test("limits members of a shared project separately", async () => {
+    const { t, projectId } = await fixture();
+    for (let i = 0; i <= MAX_JOBS_PER_USER; i++) {
+      await addSource(t, projectId, `Alice ${i}.pdf`, undefined, "alice");
+    }
+    const bobs = await addSource(t, projectId, "Bob.pdf", undefined, "bob");
+    for (let i = 0; i < MAX_JOBS_PER_USER; i++) await claim(t);
+    expect((await claim(t))?.sourceId).toBe(bobs);
+    expect(await claim(t)).toBeNull();
+  });
+
+  test("counts a file against whoever tried it again, not who uploaded it", async () => {
+    const { t, projectId } = await fixture();
+    const failed = await addSource(t, projectId, "Failed.pdf", undefined, "alice");
+    const job = (await claim(t))!;
+    await call(t, "/runner/fail", { sourceId: failed, token: job.token, error: "No" });
+    for (let i = 0; i < MAX_JOBS_PER_USER; i++) {
+      await addSource(t, projectId, `Alice ${i}.pdf`, undefined, "alice");
+      await claim(t);
+    }
+
+    const bob = t.withIdentity({ subject: "bob", issuer: "https://clerk.test" });
+    const bobsId = await bob.run(
+      async (ctx) => (await ctx.auth.getUserIdentity())!.tokenIdentifier,
+    );
+    await t.run((ctx) =>
+      ctx.db.insert("projectMembers", { projectId, userId: bobsId, role: "member" }),
+    );
+    await bob.mutation(api.sources.retry, { sourceId: failed });
+    // Alice is at her limit, but it's Bob's now.
+    expect((await source(t, failed))?.queuedBy).toBe(bobsId);
+    expect((await claim(t))?.sourceId).toBe(failed);
+  });
+
+  test("keeps a file against the same user when it's given back", async () => {
+    const { t, projectId } = await fixture();
+    const sourceId = await addSource(t, projectId, "A.pdf", undefined, "alice");
+    const job = (await claim(t))!;
+    await call(t, "/runner/fail", { sourceId, token: job.token, error: "", release: true });
+    expect(await source(t, sourceId)).toMatchObject({ status: "queued", queuedBy: "alice" });
+  });
+
+  test("doesn't record anyone for a note that needs no transcribing", async () => {
+    const { t, projectId } = await fixture();
+    const { userId } = await t.run(async (ctx) => (await ctx.db.query("projectMembers").first())!);
+    const sourceId = await t.run(async (ctx) => {
+      const storageId = await ctx.storage.store(new Blob(["# A"]));
+      const id: Id<"sources"> = await ctx.runMutation(internal.sources.completeUpload, {
+        projectId,
+        userId,
+        name: "A.md",
+        size: 3,
+        storageId,
+      });
+      return id;
+    });
+    expect((await source(t, sourceId))?.queuedBy).toBeUndefined();
+  });
+
+  test("records who uploaded a file", async () => {
+    const { t, projectId } = await fixture();
+    const { userId, sourceId } = await t.run(async (ctx) => {
+      const { userId } = (await ctx.db.query("projectMembers").first())!;
+      const storageId = await ctx.storage.store(new Blob(["%PDF-1.7"]));
+      const sourceId: Id<"sources"> = await ctx.runMutation(internal.sources.completeUpload, {
+        projectId,
+        userId,
+        name: "A.pdf",
+        size: 8,
+        storageId,
+      });
+      return { userId, sourceId };
+    });
+    expect((await source(t, sourceId))?.queuedBy).toBe(userId);
   });
 
   test("goes back in the queue when heartbeats stop, and fails after too many tries", async () => {

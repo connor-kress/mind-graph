@@ -21,6 +21,8 @@ import { MAX_SOURCE_PAGES } from "./model";
 export const LEASE_MS = 2 * 60_000;
 /** Claims a source can use up before it's marked failed, e.g. when the runner keeps crashing. */
 export const MAX_ATTEMPTS = 3;
+/** Files of one user's transcribed at once, so one user's queue doesn't hold up everyone else's. */
+export const MAX_JOBS_PER_USER = 3;
 /** How far a signed request's time can be from Convex's, either way. */
 const MAX_CLOCK_SKEW_MS = 5 * 60_000;
 export const MAX_ASSETS = 200;
@@ -290,24 +292,46 @@ export async function nudge(ctx: MutationCtx) {
   if (process.env.RUNNER_URL) await ctx.scheduler.runAfter(0, internal.runner.ping, {});
 }
 
-/** Takes the oldest queued source for the runner, with a link to download it. */
+/**
+ * Takes the oldest queued source of a user below their limit for the runner,
+ * with a link to download it. Reads a few sources per user with any queued, so
+ * neither a long queue nor other users' running jobs add to what it reads.
+ */
 export const claim = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
-    // Usually caught by `checkLease`, but this also covers claims made before a deploy.
-    const processing = await ctx.db
-      .query("sources")
-      .withIndex("by_status", (q) => q.eq("status", "processing"))
-      .collect();
-    for (const source of processing) {
-      if (!source.lease || source.lease.expiresAt <= now) await requeue(ctx, source);
-    }
-
-    const source = await ctx.db
-      .query("sources")
-      .withIndex("by_status", (q) => q.eq("status", "queued"))
+    const sources = () => ctx.db.query("sources");
+    let source: Doc<"sources"> | null = null;
+    let next = await sources()
+      .withIndex("by_status_queued_by", (q) => q.eq("status", "queued"))
       .first();
+    while (next) {
+      const { queuedBy } = next;
+      const running = await sources()
+        .withIndex("by_status_queued_by", (q) =>
+          q.eq("status", "processing").eq("queuedBy", queuedBy),
+        )
+        .collect();
+      let active = 0;
+      for (const job of running) {
+        // A claim that ran out doesn't hold up the user's next one until `checkLease` runs.
+        if (job.lease && job.lease.expiresAt > now) active++;
+        else await requeue(ctx, job);
+      }
+      if (active < MAX_JOBS_PER_USER) {
+        // Read after requeueing, since those are older.
+        const oldest = await sources()
+          .withIndex("by_status_queued_by", (q) =>
+            q.eq("status", "queued").eq("queuedBy", queuedBy),
+          )
+          .first();
+        if (oldest && (!source || oldest._creationTime < source._creationTime)) source = oldest;
+      }
+      next = await sources()
+        .withIndex("by_status_queued_by", (q) => q.eq("status", "queued").gt("queuedBy", queuedBy))
+        .first();
+    }
     if (!source) return null;
     const token = crypto.randomUUID();
     const expiresAt = now + LEASE_MS;
