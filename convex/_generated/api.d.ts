@@ -20,6 +20,7 @@ import type * as projectMigration from "../projectMigration.js";
 import type * as runner from "../runner.js";
 import type * as seedData from "../seedData.js";
 import type * as sources from "../sources.js";
+import type * as usage from "../usage.js";
 import type * as workspace from "../workspace.js";
 
 import type {
@@ -41,6 +42,7 @@ declare const fullApi: ApiFromModules<{
   runner: typeof runner;
   seedData: typeof seedData;
   sources: typeof sources;
+  usage: typeof usage;
   workspace: typeof workspace;
 }>;
 

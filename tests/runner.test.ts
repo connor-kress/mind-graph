@@ -4,6 +4,7 @@ import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { LEASE_MS, MAX_ATTEMPTS, MAX_JOBS_PER_USER, sign } from "../convex/runner";
 import schema from "../convex/schema";
+import { DEFAULT_LIMIT_USD, DEFAULT_RESET_MS, OVER_LIMIT } from "../convex/usage";
 
 const modules = import.meta.glob("../convex/**/*.ts");
 const SECRET = "test-runner-secret";
@@ -533,5 +534,265 @@ describe("finishing", () => {
       status: "failed",
       error,
     });
+  });
+});
+
+describe("transcription usage", () => {
+  const ALICE = "https://clerk.test|alice";
+  const BOB = "https://clerk.test|bob";
+
+  const usage = (t: T, userId = ALICE) =>
+    t.run((ctx) =>
+      ctx.db
+        .query("transcriptionUsage")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .unique(),
+    );
+
+  /** Edits a user's row, as an admin can by hand. */
+  async function setUsage(
+    t: T,
+    fields: Partial<{ usageUsd: number; limitUsd: number; resetMs: number }>,
+  ) {
+    const { _id } = (await usage(t))!;
+    await t.run((ctx) => ctx.db.patch(_id, fields));
+  }
+
+  /** Finishes a claimed job, as the runner does, with what it cost. */
+  async function finish(t: T, job: { sourceId: Id<"sources">; token: string }, costUsd?: number) {
+    const markdownId = await upload(t, job, MARKDOWN, "# Notes");
+    return call(t, "/runner/complete", { ...job, markdownId, assets: [], costUsd });
+  }
+
+  const prepare = (user: Awaited<ReturnType<typeof fixture>>["alice"], projectId: Id<"projects">) =>
+    user.mutation(api.sources.prepareUpload, { projectId, name: "Next.pdf", size: 10 });
+
+  test("starts with the defaults and adds what each job cost to whoever queued it", async () => {
+    const { t, alice, projectId } = await fixture();
+    expect(await alice.query(api.usage.mine)).toEqual({
+      limitUsd: DEFAULT_LIMIT_USD,
+      usageUsd: 0,
+      resetMs: DEFAULT_RESET_MS,
+      lastResetAt: null,
+    });
+    const before = Date.now();
+    await prepare(alice, projectId);
+    const row = (await usage(t))!;
+    expect(row).toMatchObject({ limitUsd: 0.5, usageUsd: 0, resetMs: 7 * 24 * 60 * 60_000 });
+    expect(row.lastResetAt).toBeGreaterThanOrEqual(before);
+
+    const finished = await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    await finish(t, (await claim(t))!, 0.1);
+    expect((await source(t, finished))?.status).toBe("ready");
+    const failed = await addSource(t, projectId, "B.pdf", undefined, ALICE);
+    const job = (await claim(t))!;
+    await call(t, "/runner/fail", {
+      sourceId: failed,
+      token: job.token,
+      error: "No",
+      costUsd: 0.05,
+    });
+    const released = await addSource(t, projectId, "C.pdf", undefined, ALICE);
+    const again = (await claim(t))!;
+    await call(t, "/runner/fail", {
+      sourceId: released,
+      token: again.token,
+      error: "",
+      release: true,
+      costUsd: 0.02,
+    });
+    expect((await alice.query(api.usage.mine)).usageUsd).toBeCloseTo(0.17);
+    expect(await usage(t, BOB)).toBeNull();
+  });
+
+  test("ignores a missing or invalid cost, and doesn't charge older files without an uploader", async () => {
+    const { t, projectId } = await fixture();
+    await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    await finish(t, (await claim(t))!);
+    await addSource(t, projectId, "B.pdf", undefined, ALICE);
+    await finish(t, (await claim(t))!, -1);
+    await addSource(t, projectId, "C.pdf");
+    await finish(t, (await claim(t))!, 0.25);
+    expect((await usage(t))?.usageUsd ?? 0).toBe(0);
+  });
+
+  test("over the limit, refuses transcription but not notes that are already Markdown", async () => {
+    const { t, alice, projectId } = await fixture();
+    await prepare(alice, projectId);
+    const failed = await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    const job = (await claim(t))!;
+    await call(t, "/runner/fail", {
+      sourceId: failed,
+      token: job.token,
+      error: "No",
+      costUsd: 0.5,
+    });
+
+    await expect(prepare(alice, projectId)).rejects.toThrow(OVER_LIMIT);
+    await expect(alice.mutation(api.sources.retry, { sourceId: failed })).rejects.toThrow(
+      OVER_LIMIT,
+    );
+    await alice.mutation(api.sources.prepareUpload, { projectId, name: "A.md", size: 10 });
+  });
+
+  test("once a job goes over the limit, cancels what's queued and lets what's running finish", async () => {
+    const { t, alice, projectId } = await fixture();
+    await prepare(alice, projectId);
+    await setUsage(t, { usageUsd: 0.49 });
+    const ids = [];
+    for (const name of ["1.pdf", "2.pdf", "3.pdf", "4.pdf", "5.pdf"]) {
+      ids.push(await addSource(t, projectId, name, undefined, ALICE));
+    }
+    // Close to the limit is still below it, so all three start.
+    const jobs = [(await claim(t))!, (await claim(t))!, (await claim(t))!];
+    expect(jobs.map((job) => job.name)).toEqual(["1.pdf", "2.pdf", "3.pdf"]);
+
+    await finish(t, jobs[0], 0.1);
+    for (const id of ids.slice(3)) {
+      expect(await alice.query(api.sources.open, { sourceId: id })).toMatchObject({
+        status: "failed",
+        error: OVER_LIMIT,
+      });
+    }
+    expect(await claim(t)).toBeNull();
+
+    expect((await finish(t, jobs[1], 0.1)).status).toBe(200);
+    expect((await finish(t, jobs[2], 0.1)).status).toBe(200);
+    expect((await source(t, ids[1]))?.status).toBe("ready");
+    expect((await source(t, ids[2]))?.status).toBe("ready");
+    expect((await usage(t))?.usageUsd).toBeCloseTo(0.79);
+  });
+
+  test("cancels a file queued while the user was going over, without stopping others", async () => {
+    const { t, alice, projectId } = await fixture();
+    await prepare(alice, projectId);
+    await setUsage(t, { usageUsd: 0.5 });
+    const late = await addSource(t, projectId, "Late.pdf", undefined, ALICE);
+    await addSource(t, projectId, "Bobs.pdf", undefined, BOB);
+    expect((await claim(t))?.name).toBe("Bobs.pdf");
+    expect(await source(t, late)).toMatchObject({ status: "failed", error: OVER_LIMIT });
+  });
+
+  test("only the first request after a period starts the next, which is a whole one", async () => {
+    const { t, alice, projectId } = await fixture();
+    await prepare(alice, projectId);
+    await setUsage(t, { usageUsd: 0.5 });
+
+    vi.advanceTimersByTime(DEFAULT_RESET_MS - 1);
+    await expect(prepare(alice, projectId)).rejects.toThrow(OVER_LIMIT);
+
+    // Nothing happens while they're away.
+    vi.advanceTimersByTime(30 * 24 * 60 * 60_000);
+    expect((await usage(t))?.usageUsd).toBe(0.5);
+
+    const before = Date.now();
+    await prepare(alice, projectId);
+    const row = (await usage(t))!;
+    expect(row.usageUsd).toBe(0);
+    expect(row.lastResetAt).toBeGreaterThanOrEqual(before);
+
+    vi.advanceTimersByTime(60_000);
+    await prepare(alice, projectId);
+    expect((await usage(t))?.lastResetAt).toBe(row.lastResetAt);
+  });
+
+  test("a job ending doesn't start a new period", async () => {
+    const { t, alice, projectId } = await fixture();
+    await prepare(alice, projectId);
+    await setUsage(t, { resetMs: 60_000 });
+    const { lastResetAt } = (await usage(t))!;
+    await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    const job = (await claim(t))!;
+    // convex-test's clock runs slightly ahead of the test's.
+    vi.advanceTimersByTime(61_000);
+    await finish(t, job, 0.1);
+    expect(await usage(t)).toMatchObject({ usageUsd: 0.1, lastResetAt });
+  });
+
+  test("a job whose claim was lost still counts, without needing its source", async () => {
+    const { t, alice, projectId } = await fixture();
+    await prepare(alice, projectId);
+    const sourceId = await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    const queued = await addSource(t, projectId, "B.pdf", undefined, ALICE);
+    const job = (await claim(t)) as { sourceId: Id<"sources">; token: string; chargeTo: string };
+    expect(job.chargeTo).toBe(ALICE);
+    await alice.mutation(api.sources.remove, { sourceId });
+    const late = await call(t, "/runner/fail", {
+      sourceId,
+      token: job.token,
+      error: "",
+      costUsd: 1,
+    });
+    expect(late.status).toBe(409);
+    expect((await usage(t))?.usageUsd).toBe(0);
+
+    await call(t, "/runner/charge", { userId: job.chargeTo, costUsd: 0.5 });
+    expect((await usage(t))?.usageUsd).toBe(0.5);
+    expect(await source(t, queued)).toMatchObject({ status: "failed", error: OVER_LIMIT });
+
+    expect((await call(t, "/runner/charge", { costUsd: 1 })).status).toBe(400);
+    const unsigned = await call(
+      t,
+      "/runner/charge",
+      { userId: ALICE, costUsd: 1 },
+      { headers: {} },
+    );
+    expect(unsigned.status).toBe(401);
+    expect((await usage(t))?.usageUsd).toBe(0.5);
+  });
+
+  test("cancels a long queue in batches, so a job's charge always goes through", async () => {
+    const { t, alice, projectId } = await fixture();
+    await prepare(alice, projectId);
+    const first = await addSource(t, projectId, "First.pdf", undefined, ALICE);
+    const job = (await claim(t))!;
+    const queued = [];
+    for (let i = 0; i < 101; i++) {
+      queued.push(await addSource(t, projectId, `${i}.pdf`, undefined, ALICE));
+    }
+    await finish(t, job, 0.5);
+    expect((await source(t, first))?.status).toBe("ready");
+    expect((await source(t, queued[99]))?.status).toBe("failed");
+    expect((await source(t, queued[100]))?.status).toBe("queued");
+    expect(await claim(t)).toBeNull();
+    expect((await source(t, queued[100]))?.status).toBe("failed");
+  });
+
+  test("doesn't start a period for a user already running all they can", async () => {
+    const { t, alice, projectId } = await fixture();
+    await prepare(alice, projectId);
+    await setUsage(t, { resetMs: 1000 });
+    const { lastResetAt } = (await usage(t))!;
+    for (let i = 0; i < MAX_JOBS_PER_USER + 1; i++) {
+      await addSource(t, projectId, `${i}.pdf`, undefined, ALICE);
+    }
+    for (let i = 0; i < MAX_JOBS_PER_USER; i++) await claim(t);
+    // Clears the period, not the leases.
+    vi.advanceTimersByTime(2000);
+    expect(await claim(t)).toBeNull();
+    expect((await usage(t))?.lastResetAt).toBe(lastResetAt);
+  });
+
+  test("a queued file is claimed once its user's period is over", async () => {
+    const { t, alice, projectId } = await fixture();
+    await prepare(alice, projectId);
+    await setUsage(t, { usageUsd: 0.5 });
+    vi.advanceTimersByTime(DEFAULT_RESET_MS + 1000);
+    await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    expect((await claim(t))?.name).toBe("A.pdf");
+    expect((await usage(t))?.usageUsd).toBe(0);
+  });
+
+  test("a user's limit and period can be changed in their row", async () => {
+    const { t, alice, projectId } = await fixture();
+    await prepare(alice, projectId);
+    await setUsage(t, { usageUsd: 40, limitUsd: 100, resetMs: 1000 });
+    await prepare(alice, projectId);
+    expect(await alice.query(api.usage.mine)).toMatchObject({ limitUsd: 100, usageUsd: 40 });
+
+    await setUsage(t, { limitUsd: 10 });
+    await expect(prepare(alice, projectId)).rejects.toThrow(OVER_LIMIT);
+    vi.advanceTimersByTime(2000);
+    await prepare(alice, projectId);
   });
 });

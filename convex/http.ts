@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { httpAction } from "./_generated/server";
 import {
+  chargeEndpoint,
   claimEndpoint,
   completeEndpoint,
   failEndpoint,
@@ -82,5 +83,6 @@ http.route({ path: "/runner/heartbeat", method: "POST", handler: heartbeatEndpoi
 http.route({ path: "/runner/upload", method: "POST", handler: uploadEndpoint });
 http.route({ path: "/runner/complete", method: "POST", handler: completeEndpoint });
 http.route({ path: "/runner/fail", method: "POST", handler: failEndpoint });
+http.route({ path: "/runner/charge", method: "POST", handler: chargeEndpoint });
 
 export default http;

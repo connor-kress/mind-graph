@@ -89,6 +89,18 @@ export default defineSchema({
     .index("by_project", ["projectId"])
     .index("by_status_queued_by", ["status", "queuedBy"]),
 
+  // What a user's transcriptions have cost in this period, against their limit.
+  // Edit `limitUsd` or `resetMs` by hand to change them for one user.
+  transcriptionUsage: defineTable({
+    userId: v.string(),
+    limitUsd: v.number(),
+    usageUsd: v.number(),
+    /** How long a period lasts. The next starts with the first request after it. */
+    resetMs: v.number(),
+    /** When this period started. */
+    lastResetAt: v.number(),
+  }).index("by_user", ["userId"]),
+
   // A file the document runner uploaded for a claim's result, until the claim ends.
   runnerUploads: defineTable({
     sourceId: v.id("sources"),

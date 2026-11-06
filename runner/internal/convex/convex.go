@@ -30,6 +30,8 @@ type Job struct {
 	Size     int64  `json:"size"`
 	FileURL  string `json:"fileUrl"`
 	LeaseMS  int64  `json:"leaseMs"`
+	// Who the job's cost counts against, if anyone.
+	ChargeTo string `json:"chargeTo"`
 	// When the claim was asked for. Its lease started no earlier.
 	Asked time.Time `json:"-"`
 }
@@ -150,13 +152,15 @@ func (c *Client) Upload(ctx context.Context, job *Job, contentType string, data 
 	return out.StorageID, nil
 }
 
-func (c *Client) Complete(ctx context.Context, job *Job, markdownID string, pageCount int, assets []Asset) error {
+// Complete saves the job's result, and what it cost, which counts against the user's limit.
+func (c *Client) Complete(ctx context.Context, job *Job, markdownID string, pageCount int, assets []Asset, costUSD float64) error {
 	in := struct {
 		lease
 		MarkdownID string  `json:"markdownId"`
 		PageCount  *int    `json:"pageCount,omitempty"`
 		Assets     []Asset `json:"assets"`
-	}{job.lease(), markdownID, nil, assets}
+		CostUSD    float64 `json:"costUsd"`
+	}{job.lease(), markdownID, nil, assets, costUSD}
 	if pageCount > 0 {
 		in.PageCount = &pageCount
 	}
@@ -166,14 +170,28 @@ func (c *Client) Complete(ctx context.Context, job *Job, markdownID string, page
 	return c.call(ctx, "/runner/complete", in, nil)
 }
 
-// Fail ends the claim with a message for the user. A released job is queued again instead.
-func (c *Client) Fail(ctx context.Context, job *Job, message string, release bool) error {
+// Fail ends the claim with a message for the user. A released job is queued
+// again instead. What it cost so far counts against the user's limit either way.
+func (c *Client) Fail(ctx context.Context, job *Job, message string, release bool, costUSD float64) error {
 	in := struct {
 		lease
-		Error   string `json:"error"`
-		Release bool   `json:"release"`
-	}{job.lease(), message, release}
+		Error   string  `json:"error"`
+		Release bool    `json:"release"`
+		CostUSD float64 `json:"costUsd"`
+	}{job.lease(), message, release, costUSD}
 	return c.call(ctx, "/runner/fail", in, nil)
+}
+
+// Charge counts what a job cost whose claim was lost, so that Complete and Fail can't report it.
+func (c *Client) Charge(ctx context.Context, job *Job, costUSD float64) error {
+	if job.ChargeTo == "" || costUSD == 0 {
+		return nil
+	}
+	in := struct {
+		UserID  string  `json:"userId"`
+		CostUSD float64 `json:"costUsd"`
+	}{job.ChargeTo, costUSD}
+	return c.call(ctx, "/runner/charge", in, nil)
 }
 
 // Download fetches the claimed file, refusing anything larger than it should be.
