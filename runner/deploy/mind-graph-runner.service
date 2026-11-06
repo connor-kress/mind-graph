@@ -1,0 +1,60 @@
+[Unit]
+Description=Mind Graph document runner
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/mind-graph-runner
+# Secrets and which deployment to work for. Only root can read this file.
+EnvironmentFile=/etc/mind-graph-runner.env
+Environment=LISTEN=127.0.0.1:8090
+Environment=POLL_INTERVAL=60s
+Environment=IDLE_EXIT=0
+Restart=always
+RestartSec=5s
+
+# On a restart, the runner ends its own PDF tools and gives its jobs back. If the
+# tools were sent the signal too, a job could fail before the runner saw it.
+KillMode=mixed
+TimeoutStopSec=45s
+
+# This server is small and shared, so the runner gives way to everything else.
+Environment=GOMEMLIMIT=250MiB
+MemoryHigh=300M
+MemoryMax=350M
+# Out of memory, the kernel kills a process and the rest carry on. Killing a PDF
+# tool fails that one file, where stopping would give back every job, this one
+# too, without using a try, so a file that doesn't fit would go round forever.
+OOMPolicy=continue
+OOMScoreAdjust=500
+CPUQuota=150%
+CPUWeight=20
+
+# It runs PDF tools on files anyone with an account uploads.
+DynamicUser=yes
+UMask=0077
+ProtectHome=yes
+ProtectProc=invisible
+ProcSubset=pid
+PrivateDevices=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+CapabilityBoundingSet=
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+# The addresses that hand out an instance's AWS credentials.
+IPAddressDeny=169.254.169.254 fd00:ec2::254
+
+[Install]
+WantedBy=multi-user.target
