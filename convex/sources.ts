@@ -21,6 +21,7 @@ import {
   tidyTitle,
   titleFromFileName,
 } from "./model";
+import { requireBelowLimit } from "./usage";
 
 /** A source the current user can see, or null if it has been deleted. */
 async function requireSource(ctx: QueryCtx, sourceId: Id<"sources">) {
@@ -98,6 +99,7 @@ export const prepareUpload = mutation({
     if (!Number.isSafeInteger(size) || size < 0) throw new ConvexError("Invalid file size");
     const problem = fileProblem(name, size);
     if (problem) throw new ConvexError(problem);
+    if (!isNoteFile(kindOfFile(name)!)) await requireBelowLimit(ctx, userId);
     const token = crypto.randomUUID() + crypto.randomUUID();
     const ticketId = await ctx.db.insert("sourceUploads", {
       token,
@@ -186,6 +188,7 @@ export const retry = mutation({
     const source = await requireSource(ctx, sourceId);
     if (source?.status !== "failed") return;
     const queuedBy = await requireUser(ctx);
+    await requireBelowLimit(ctx, queuedBy);
     await ctx.db.patch(sourceId, {
       status: "queued",
       queuedBy,

@@ -5,6 +5,7 @@ import { kindOfFile, losesImages, SOURCE_KINDS } from "../../convex/model";
 import { useIsMobile } from "../hooks/use-mobile";
 import { SourceList } from "../sources/SourceList";
 import { SourceReader } from "../sources/SourceReader";
+import { TranscriptionUsage } from "../sources/TranscriptionUsage";
 import { useUpload } from "../sources/useUpload";
 import { Button } from "./ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
@@ -203,6 +204,7 @@ export function NotesPanel({ projectId, hidden, open, onOpenChange }: Props) {
               onError={(message) => shownId && onErrorIn(shownId, message)}
             />
           )}
+          <TranscriptionUsage />
         </>
       )}
       {dragging && projectId && (

@@ -12,6 +12,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { MAX_SOURCE_PAGES } from "./model";
+import { addUsage, isOverLimit, OVER_LIMIT, usageForRequest } from "./usage";
 
 // The document runner transcribes queued sources. It asks for work over these
 // endpoints; Convex never needs to reach it, though it can nudge a runner with
@@ -31,6 +32,7 @@ export const MAX_RESULT_BYTES = 10 * 1024 * 1024;
 /** Bytes in a request that isn't an upload. */
 const MAX_JSON_BYTES = 256 * 1024;
 const MAX_ERROR_LENGTH = 500;
+const CANCEL_BATCH = 100;
 const ASSET_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 const MARKDOWN_TYPE = "text/markdown; charset=utf-8";
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
@@ -204,6 +206,7 @@ export const completeEndpoint = jsonEndpoint(async (ctx, body) => {
       name: String(asset?.name),
       storageId: asset?.storageId as Id<"_storage">,
     })),
+    costUsd: costOf(body),
   });
   return done ? { body: {} } : lost;
 });
@@ -213,9 +216,31 @@ export const failEndpoint = jsonEndpoint(async (ctx, body) => {
     ...lease(body),
     error: String(body.error ?? ""),
     release: body.release === true,
+    costUsd: costOf(body),
   });
   return done ? { body: {} } : lost;
 });
+
+/**
+ * Counts what a job cost whose claim was lost, so has no source to charge, e.g.
+ * because it was deleted while it was being transcribed.
+ */
+export const chargeEndpoint = jsonEndpoint(async (ctx, body) => {
+  if (typeof body.userId !== "string" || !body.userId) {
+    return { status: 400, body: { error: "Expected a user" } };
+  }
+  await ctx.runMutation(internal.runner.chargeUser, {
+    userId: body.userId,
+    costUsd: costOf(body),
+  });
+  return { body: {} };
+});
+
+/** What a job says it cost so far. */
+function costOf(body: Record<string, unknown>) {
+  const { costUsd } = body;
+  return typeof costUsd === "number" && Number.isFinite(costUsd) && costUsd > 0 ? costUsd : 0;
+}
 
 /** The claim a request names. Convex validates the ID when it's used. */
 function lease(body: Record<string, unknown>) {
@@ -287,13 +312,38 @@ async function requeue(ctx: MutationCtx, source: Doc<"sources">) {
   }
 }
 
+/**
+ * Counts what a job cost against whoever queued it. Once that puts them over
+ * their limit, their queued files are cancelled; any others running carry on.
+ */
+async function charge(ctx: MutationCtx, queuedBy: string | undefined, costUsd: number) {
+  if (queuedBy === undefined || costUsd === 0) return;
+  if (isOverLimit(await addUsage(ctx, queuedBy, costUsd))) await cancelQueued(ctx, queuedBy);
+}
+
+export const chargeUser = internalMutation({
+  args: { userId: v.string(), costUsd: v.number() },
+  handler: (ctx, { userId, costUsd }) => charge(ctx, userId, costUsd),
+});
+
+/** Cancels a batch of a user's queued files. Each claim cancels more, if there are any left. */
+async function cancelQueued(ctx: MutationCtx, queuedBy: string) {
+  const queued = await ctx.db
+    .query("sources")
+    .withIndex("by_status_queued_by", (q) => q.eq("status", "queued").eq("queuedBy", queuedBy))
+    .take(CANCEL_BATCH);
+  for (const source of queued) {
+    await ctx.db.patch(source._id, { status: "failed", error: OVER_LIMIT, attempts: undefined });
+  }
+}
+
 /** Asks a runner with a public address to look for work now, if there is one. */
 export async function nudge(ctx: MutationCtx) {
   if (process.env.RUNNER_URL) await ctx.scheduler.runAfter(0, internal.runner.ping, {});
 }
 
 /**
- * Takes the oldest queued source of a user below their limit for the runner,
+ * Takes the oldest queued source of a user below their limits for the runner,
  * with a link to download it. Reads a few sources per user with any queued, so
  * neither a long queue nor other users' running jobs add to what it reads.
  */
@@ -320,13 +370,17 @@ export const claim = internalMutation({
         else await requeue(ctx, job);
       }
       if (active < MAX_JOBS_PER_USER) {
-        // Read after requeueing, since those are older.
-        const oldest = await sources()
-          .withIndex("by_status_queued_by", (q) =>
-            q.eq("status", "queued").eq("queuedBy", queuedBy),
-          )
-          .first();
-        if (oldest && (!source || oldest._creationTime < source._creationTime)) source = oldest;
+        if (queuedBy !== undefined && isOverLimit(await usageForRequest(ctx, queuedBy))) {
+          await cancelQueued(ctx, queuedBy);
+        } else {
+          // Read after requeueing, since those are older.
+          const oldest = await sources()
+            .withIndex("by_status_queued_by", (q) =>
+              q.eq("status", "queued").eq("queuedBy", queuedBy),
+            )
+            .first();
+          if (oldest && (!source || oldest._creationTime < source._creationTime)) source = oldest;
+        }
       }
       next = await sources()
         .withIndex("by_status_queued_by", (q) => q.eq("status", "queued").gt("queuedBy", queuedBy))
@@ -352,6 +406,7 @@ export const claim = internalMutation({
       size: source.size,
       fileUrl: await ctx.storage.getUrl(source.storageId),
       leaseMs: LEASE_MS,
+      chargeTo: source.queuedBy,
     };
   },
 });
@@ -397,11 +452,13 @@ export const complete = internalMutation({
     markdownId: v.id("_storage"),
     pageCount: v.optional(v.number()),
     assets: v.array(v.object({ name: v.string(), storageId: v.id("_storage") })),
+    costUsd: v.number(),
   },
-  handler: async (ctx, { sourceId, token, markdownId, pageCount, assets }) => {
+  handler: async (ctx, { sourceId, token, markdownId, pageCount, assets, costUsd }) => {
     const source = await leased(ctx, sourceId, token);
     // Deleted, timed out or already finished: its files went with the claim.
     if (!source) return false;
+    await charge(ctx, source.queuedBy, costUsd);
 
     const uploads = await ctx.db
       .query("runnerUploads")
@@ -464,10 +521,17 @@ export const complete = internalMutation({
  * e.g. when the runner shuts down; otherwise it's failed with the given reason.
  */
 export const fail = internalMutation({
-  args: { sourceId: v.id("sources"), token: v.string(), error: v.string(), release: v.boolean() },
-  handler: async (ctx, { sourceId, token, error, release }) => {
+  args: {
+    sourceId: v.id("sources"),
+    token: v.string(),
+    error: v.string(),
+    release: v.boolean(),
+    costUsd: v.number(),
+  },
+  handler: async (ctx, { sourceId, token, error, release, costUsd }) => {
     const source = await leased(ctx, sourceId, token);
     if (!source) return false;
+    await charge(ctx, source.queuedBy, costUsd);
     await endClaim(ctx, sourceId, token);
     if (release) {
       // Not the file's fault, so the claim doesn't count.

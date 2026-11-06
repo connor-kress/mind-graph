@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from "convex/react";
+import { ConvexError } from "convex/values";
 import { BookOpen, MoreHorizontal, Pencil, RotateCw, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
@@ -162,7 +163,11 @@ export function SourceList({ projectId, pending, onListed, onOpen, onError }: Pr
                   aria-label={`Transcribe ${source.title} again`}
                   title="Try again"
                   onClick={() =>
-                    retry({ sourceId: source._id }).catch(() => onError("Couldn't try again"))
+                    retry({ sourceId: source._id }).catch((error) =>
+                      onError(
+                        error instanceof ConvexError ? String(error.data) : "Couldn't try again",
+                      ),
+                    )
                   }
                 >
                   <RotateCw />

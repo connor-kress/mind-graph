@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from "convex/react";
+import { ConvexError } from "convex/values";
 import { ChevronLeft, ExternalLink, Minus, Plus } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
@@ -65,7 +66,7 @@ function useContent(url: string | null) {
 export function SourceReader({ sourceId, onClose }: Props) {
   const source = useQuery(api.sources.open, { sourceId });
   const retry = useMutation(api.sources.retry);
-  const [retryFailed, setRetryFailed] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
   const { content, reload } = useContent(source?.markdownUrl ?? null);
   const text = useTextSize();
 
@@ -86,18 +87,22 @@ export function SourceReader({ sourceId, onClose }: Props) {
           type="button"
           className="font-medium text-foreground underline underline-offset-4"
           onClick={() => {
-            setRetryFailed(false);
+            setRetryError(null);
             retry({ sourceId }).catch((error) => {
               console.error(error);
-              setRetryFailed(true);
+              setRetryError(
+                error instanceof ConvexError
+                  ? String(error.data)
+                  : "Couldn't try again. Check your connection.",
+              );
             });
           }}
         >
           Try again
         </button>
-        {retryFailed && (
+        {retryError && (
           <span role="alert" className="mt-2 block text-destructive">
-            Couldn't try again. Check your connection.
+            {retryError}
           </span>
         )}
       </Message>

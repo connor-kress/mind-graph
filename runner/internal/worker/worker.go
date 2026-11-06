@@ -70,7 +70,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		switch {
 		case ctx.Err() != nil:
 			if job != nil {
-				w.release(ctx, job)
+				w.release(ctx, job, 0)
 			}
 			return nil
 		case err != nil:
@@ -157,7 +157,7 @@ func (w *Worker) process(ctx context.Context, job *convex.Job) {
 	}
 	expires, err := w.confirmClaim(jobCtx, job)
 	if ctx.Err() != nil {
-		w.release(ctx, job)
+		w.release(ctx, job, 0)
 		return
 	} else if err != nil {
 		// Another runner may have it by now, so it's left to its lease.
@@ -169,7 +169,7 @@ func (w *Worker) process(ctx context.Context, job *convex.Job) {
 		defer close(beats)
 		w.heartbeat(jobCtx, cancel, job, expires)
 	}()
-	err = w.transcribe(jobCtx, job)
+	err = w.transcribe(jobCtx, job, spent)
 	cause := context.Cause(jobCtx)
 	cancel(nil)
 	<-beats
@@ -185,31 +185,41 @@ func (w *Worker) process(ctx context.Context, job *convex.Job) {
 		return
 	case errors.Is(err, convex.ErrLost) || errors.Is(cause, convex.ErrLost):
 		log.Warn("the claim was lost, e.g. the source was deleted; stopping", attrs...)
+		w.chargeLost(finish, job, spent.USD())
 		return
 	case ctx.Err() != nil:
 		log.Info("shutting down; giving the job back", attrs...)
-		w.release(ctx, job)
+		w.release(ctx, job, spent.USD())
 		return
 	case errors.Is(cause, errTimedOut):
 		log.Error("transcription took too long", attrs...)
-		err = w.Convex.Fail(finish, job, "Transcription took too long. Try again, or try a shorter file.", false)
+		err = w.Convex.Fail(finish, job, "Transcription took too long. Try again, or try a shorter file.", false, spent.USD())
 	case errors.As(err, &user):
 		log.Info("can't transcribe this file", append(attrs, "reason", user.Error())...)
-		err = w.Convex.Fail(finish, job, user.Error(), false)
+		err = w.Convex.Fail(finish, job, user.Error(), false, spent.USD())
 	default:
 		log.Error("transcription failed", append(attrs, "error", err)...)
-		err = w.Convex.Fail(finish, job, "Couldn't transcribe this file. Try again.", false)
+		err = w.Convex.Fail(finish, job, "Couldn't transcribe this file. Try again.", false, spent.USD())
 	}
 	if err != nil && !errors.Is(err, convex.ErrLost) {
 		log.Error("couldn't report the failure; the claim will run out instead", "error", err)
 	}
 }
 
+// chargeLost counts what a job cost whose claim was lost, so it can't be avoided
+// by deleting the source. It's only for a claim known to have been lost before
+// it finished: if completing it seemed to fail, it may have counted already.
+func (w *Worker) chargeLost(ctx context.Context, job *convex.Job, costUSD float64) {
+	if err := w.Convex.Charge(ctx, job, costUSD); err != nil {
+		slog.Warn("couldn't count what a lost job cost", "source", job.SourceID, "cost_usd", costUSD, "error", err)
+	}
+}
+
 // release gives a job back to the queue without using up one of its tries.
-func (w *Worker) release(ctx context.Context, job *convex.Job) {
+func (w *Worker) release(ctx context.Context, job *convex.Job, costUSD float64) {
 	finish, done := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer done()
-	if err := w.Convex.Fail(finish, job, "", true); err != nil && !errors.Is(err, convex.ErrLost) {
+	if err := w.Convex.Fail(finish, job, "", true, costUSD); err != nil && !errors.Is(err, convex.ErrLost) {
 		slog.Warn("couldn't give the job back; its claim will run out instead", "source", job.SourceID, "error", err)
 	}
 }
@@ -273,7 +283,7 @@ func (w *Worker) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, 
 	}
 }
 
-func (w *Worker) transcribe(ctx context.Context, job *convex.Job) error {
+func (w *Worker) transcribe(ctx context.Context, job *convex.Job, spent *openrouter.Spending) error {
 	data, err := w.Convex.Download(ctx, job)
 	if err != nil {
 		return err
@@ -305,5 +315,5 @@ func (w *Worker) transcribe(ctx context.Context, job *convex.Job) error {
 	if err != nil {
 		return err
 	}
-	return w.Convex.Complete(ctx, job, markdownID, result.Pages, assets)
+	return w.Convex.Complete(ctx, job, markdownID, result.Pages, assets, spent.USD())
 }

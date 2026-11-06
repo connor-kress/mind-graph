@@ -80,6 +80,8 @@ type fakeConvex struct {
 	lost bool
 	// Whether heartbeats find the claim lost.
 	lostOnHeartbeat bool
+	// Whether reporting a failure finds the claim lost, as when completing it did work.
+	lostOnFail bool
 	// How many jobs are queued, one if zero.
 	jobs int
 	// Whether a claim gets nothing, as when the user is at their limit. Optional.
@@ -90,6 +92,7 @@ type fakeConvex struct {
 	uploads  map[string]string
 	complete map[string]any
 	failed   map[string]any
+	charged  map[string]any
 	// How many jobs have been completed or failed.
 	completes, fails int
 }
@@ -111,7 +114,7 @@ func newFakeConvex(t *testing.T, file []byte) *fakeConvex {
 		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		if action != "claim" && (f.lost || !strings.HasPrefix(in["token"].(string), "token-") || action == "heartbeat" && f.lostOnHeartbeat) {
+		if action != "claim" && action != "charge" && (f.lost || !strings.HasPrefix(in["token"].(string), "token-") || action == "heartbeat" && f.lostOnHeartbeat || action == "fail" && f.lostOnFail) {
 			http.Error(rw, "lost", http.StatusConflict)
 			return
 		}
@@ -122,7 +125,7 @@ func newFakeConvex(t *testing.T, file []byte) *fakeConvex {
 				f.claimed++
 				n := strconv.Itoa(f.claimed)
 				job = convex.Job{SourceID: "source-" + n, Token: "token-" + n, Name: "Notes.pdf", Kind: "pdf",
-					Size: int64(len(f.file)), FileURL: f.server.URL + "/file", LeaseMS: f.leaseMS}
+					Size: int64(len(f.file)), FileURL: f.server.URL + "/file", LeaseMS: f.leaseMS, ChargeTo: "alice"}
 			}
 			json.NewEncoder(rw).Encode(map[string]any{"job": job})
 		case "upload":
@@ -138,6 +141,9 @@ func newFakeConvex(t *testing.T, file []byte) *fakeConvex {
 		case "fail":
 			f.failed = in
 			f.fails++
+			rw.Write([]byte("{}"))
+		case "charge":
+			f.charged = in
 			rw.Write([]byte("{}"))
 		}
 	})
@@ -347,6 +353,79 @@ func TestEachJobLogsOnlyWhatItCost(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+func TestWorkerSendsWhatTheJobCost(t *testing.T) {
+	ai := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		rw.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"cost":0.25}}`))
+	}))
+	defer ai.Close()
+	client := &openrouter.Client{URL: ai.URL, HTTP: http.DefaultClient}
+	// Spends, then ends as the given function says.
+	spends := func(end func(ctx context.Context) (*transcribe.Result, error)) fakeTranscriber {
+		return func(ctx context.Context, _ string) (*transcribe.Result, error) {
+			if _, err := client.Complete(ctx, openrouter.Request{}); err != nil {
+				t.Error(err)
+			}
+			return end(ctx)
+		}
+	}
+
+	f := newFakeConvex(t, []byte("%PDF"))
+	runOnce(t, f, spends(func(context.Context) (*transcribe.Result, error) {
+		return &transcribe.Result{Markdown: "# Notes"}, nil
+	}))
+	if f.complete["costUsd"] != 0.25 {
+		t.Errorf("completed with %v", f.complete)
+	}
+
+	f = newFakeConvex(t, []byte("%PDF"))
+	runOnce(t, f, spends(func(context.Context) (*transcribe.Result, error) {
+		return nil, io.ErrUnexpectedEOF
+	}))
+	if f.failed["costUsd"] != 0.25 || f.failed["release"] != false {
+		t.Errorf("failed with %v", f.failed)
+	}
+
+	f = newFakeConvex(t, []byte("%PDF"))
+	runOnce(t, f, spends(func(ctx context.Context) (*transcribe.Result, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}), 50*time.Millisecond)
+	if f.failed["costUsd"] != 0.25 || f.failed["release"] != true {
+		t.Errorf("gave back with %v", f.failed)
+	}
+
+	// Deleting the source while it's transcribed loses the claim, but it still costs.
+	f = newFakeConvex(t, []byte("%PDF"))
+	f.leaseMS, f.lostOnHeartbeat = 80, true
+	runOnce(t, f, spends(func(ctx context.Context) (*transcribe.Result, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}))
+	if f.complete != nil || f.failed != nil || f.charged["userId"] != "alice" || f.charged["costUsd"] != 0.25 {
+		t.Errorf("charged %v, finished with %v %v", f.charged, f.complete, f.failed)
+	}
+
+	// So does a job whose result arrives after that.
+	f = newFakeConvex(t, []byte("%PDF"))
+	f.lost = true
+	runOnce(t, f, spends(func(context.Context) (*transcribe.Result, error) {
+		return &transcribe.Result{Markdown: "# Notes"}, nil
+	}))
+	if f.charged["costUsd"] != 0.25 {
+		t.Errorf("charged %v", f.charged)
+	}
+
+	// If completing seemed to fail, it may have counted already, so it isn't charged again.
+	f = newFakeConvex(t, []byte("%PDF"))
+	f.lostOnFail = true
+	runOnce(t, f, spends(func(context.Context) (*transcribe.Result, error) {
+		return nil, io.ErrUnexpectedEOF
+	}))
+	if f.charged != nil {
+		t.Errorf("charged %v", f.charged)
+	}
 }
 
 func TestWorkerReportsWhyAFileCantBeTranscribed(t *testing.T) {
