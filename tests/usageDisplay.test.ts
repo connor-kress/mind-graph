@@ -1,5 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { dayAndTime, percentLeft, shortDuration } from "../src/sources/usageDisplay";
+import {
+  costText,
+  dayAndTime,
+  percentLeft,
+  shortDuration,
+  tookText,
+} from "../src/sources/usageDisplay";
+
+describe("costText", () => {
+  it("shows dollars and cents", () => {
+    expect(costText(0.12)).toBe("$0.12");
+    expect(costText(1.5)).toBe("$1.50");
+    expect(costText(0.006)).toBe("$0.01");
+  });
+
+  it("only looks free if it was", () => {
+    expect(costText(0)).toBe("$0.00");
+    expect(costText(0.002)).toBe("<$0.01");
+  });
+});
+
+describe("tookText", () => {
+  it("shows minutes only when there are some", () => {
+    expect(tookText(45_000)).toBe("45s");
+    expect(tookText(176_000)).toBe("2m 56s");
+    expect(tookText(120_000)).toBe("2m 0s");
+  });
+
+  it("rounds up, so nothing takes no time", () => {
+    expect(tookText(0)).toBe("1s");
+    expect(tookText(44_100)).toBe("45s");
+    expect(tookText(59_500)).toBe("1m 0s");
+  });
+});
 
 describe("percentLeft", () => {
   it("rounds to the nearest percent", () => {

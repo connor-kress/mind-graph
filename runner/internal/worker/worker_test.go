@@ -125,7 +125,7 @@ func newFakeConvex(t *testing.T, file []byte) *fakeConvex {
 				f.claimed++
 				n := strconv.Itoa(f.claimed)
 				job = convex.Job{SourceID: "source-" + n, Token: "token-" + n, Name: "Notes.pdf", Kind: "pdf",
-					Size: int64(len(f.file)), FileURL: f.server.URL + "/file", LeaseMS: f.leaseMS, ChargeTo: "alice"}
+					Size: int64(len(f.file)), FileURL: f.server.URL + "/file", LeaseMS: f.leaseMS}
 			}
 			json.NewEncoder(rw).Encode(map[string]any{"job": job})
 		case "upload":
@@ -403,7 +403,7 @@ func TestWorkerSendsWhatTheJobCost(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}))
-	if f.complete != nil || f.failed != nil || f.charged["userId"] != "alice" || f.charged["costUsd"] != 0.25 {
+	if f.complete != nil || f.failed != nil || f.charged["token"] != "token-1" || f.charged["sourceId"] != "source-1" || f.charged["costUsd"] != 0.25 {
 		t.Errorf("charged %v, finished with %v %v", f.charged, f.complete, f.failed)
 	}
 
@@ -417,13 +417,25 @@ func TestWorkerSendsWhatTheJobCost(t *testing.T) {
 		t.Errorf("charged %v", f.charged)
 	}
 
-	// If completing seemed to fail, it may have counted already, so it isn't charged again.
+	// And one whose failure arrives after that. Convex ignores this if the job
+	// had really been completed, and only the response to that was lost.
 	f = newFakeConvex(t, []byte("%PDF"))
 	f.lostOnFail = true
 	runOnce(t, f, spends(func(context.Context) (*transcribe.Result, error) {
 		return nil, io.ErrUnexpectedEOF
 	}))
-	if f.charged != nil {
+	if f.charged["costUsd"] != 0.25 {
+		t.Errorf("charged %v", f.charged)
+	}
+
+	// And one given back after that.
+	f = newFakeConvex(t, []byte("%PDF"))
+	f.lostOnFail = true
+	runOnce(t, f, spends(func(ctx context.Context) (*transcribe.Result, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}), 50*time.Millisecond)
+	if f.charged["costUsd"] != 0.25 {
 		t.Errorf("charged %v", f.charged)
 	}
 }

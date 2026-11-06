@@ -17,6 +17,19 @@ export function shortDuration(ms: number) {
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
+/** A cost like "$0.12", or "<$0.01" if it would otherwise look free. */
+export function costText(usd: number) {
+  const dollars = usd.toFixed(2);
+  return usd > 0 && dollars === "0.00" ? "<$0.01" : `$${dollars}`;
+}
+
+/** How long something took like "2m 56s" or "45s", rounded up to the second. */
+export function tookText(ms: number) {
+  const total = Math.max(1, Math.ceil(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  return minutes > 0 ? `${minutes}m ${total % 60}s` : `${total}s`;
+}
+
 /** A moment in the near future like "tomorrow at 3:00 PM" or "Nov 11 at 1:21 PM". */
 export function dayAndTime(at: number, now: number) {
   const date = new Date(at);

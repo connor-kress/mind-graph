@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { ConvexError } from "convex/values";
 import { BookOpen, MoreHorizontal, Pencil, RotateCw, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import {
@@ -17,6 +18,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "../components/ui/context-menu";
@@ -24,12 +26,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Skeleton } from "../components/ui/skeleton";
 import { FileIcon } from "./FileIcon";
+import { costText, tookText } from "./usageDisplay";
 import type { PendingUpload } from "./useUpload";
 
 type Props = {
@@ -51,6 +55,43 @@ function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/**
+ * What transcribing a source cost and how long it took, with totals if it took
+ * more than once. Each kind of menu passes its own parts, which only work inside it.
+ */
+function RunStats({
+  stats,
+  Label,
+  Separator,
+}: {
+  stats: FunctionReturnType<typeof api.sources.list>[number]["runStats"];
+  Label: ComponentType<{ className?: string; children?: ReactNode }>;
+  Separator: ComponentType;
+}) {
+  if (!stats) return null;
+  const { retries, latest, totalCostUsd, totalDurationMs } = stats;
+  return (
+    <>
+      <Label className="font-normal tabular-nums">
+        {retries > 0 && <div>Retries: {retries}</div>}
+        {latest && (
+          <>
+            <div>
+              Cost {costText(latest.costUsd)}
+              {retries > 0 && ` (${costText(totalCostUsd)} total)`}
+            </div>
+            <div>
+              Took {tookText(latest.durationMs)}
+              {retries > 0 && ` (${tookText(totalDurationMs)} total)`}
+            </div>
+          </>
+        )}
+      </Label>
+      <Separator />
+    </>
+  );
 }
 
 /** A project's source files, plus the ones still uploading. */
@@ -143,9 +184,14 @@ export function SourceList({ projectId, pending, onListed, onOpen, onError }: Pr
                   </button>
                 </ContextMenuTrigger>
                 <ContextMenuContent
-                  className="w-44 whitespace-nowrap"
+                  className="w-max min-w-44 whitespace-nowrap"
                   onKeyDown={(e) => e.stopPropagation()}
                 >
+                  <RunStats
+                    stats={source.runStats}
+                    Label={ContextMenuLabel}
+                    Separator={ContextMenuSeparator}
+                  />
                   <ContextMenuItem onSelect={renameNote}>
                     <Pencil />
                     Rename note
@@ -187,10 +233,15 @@ export function SourceList({ projectId, pending, onListed, onOpen, onError }: Pr
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
-                  className="w-44 whitespace-nowrap"
+                  className="w-max min-w-44 whitespace-nowrap"
                   align="end"
                   onKeyDown={(e) => e.stopPropagation()}
                 >
+                  <RunStats
+                    stats={source.runStats}
+                    Label={DropdownMenuLabel}
+                    Separator={DropdownMenuSeparator}
+                  />
                   <DropdownMenuItem onSelect={renameNote}>
                     <Pencil />
                     Rename note
