@@ -26,7 +26,7 @@ pnpm lint
 pnpm exec tsc -p convex/tsconfig.json --noEmit
 ```
 
-Markdown and text notes are ready as soon as they're uploaded. PDF, Word and PowerPoint files wait for the [document runner](runner/README.md) to transcribe them; run it locally with `cd runner && go run .` after setting it up.
+Markdown and text notes are ready as soon as they're uploaded. PDF, Word and PowerPoint files wait for the [document runner](runner/README.md) to transcribe them; run it locally with `pnpm dev:runner` after setting it up.
 
 The sidebar supports map search with `Ctrl`/`Cmd` + `K` and collapses with `Ctrl`/`Cmd` + `\`. Project and map actions are available from their menus or a right-click.
 
