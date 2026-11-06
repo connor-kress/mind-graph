@@ -101,7 +101,8 @@ export function SourceList({ projectId, pending, onListed, onOpen, onError }: Pr
 
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <ul className="p-2">
+      {/* Leaves room to scroll the last file out from under the floating usage bar. */}
+      <ul className="p-2 pb-16">
         {sources.map((source) => {
           const renameNote = () => setRenamingId(source._id);
           const deleteNote = () => {
