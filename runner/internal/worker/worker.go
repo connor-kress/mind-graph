@@ -9,10 +9,13 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/connor-kress/mind-graph/runner/internal/config"
 	"github.com/connor-kress/mind-graph/runner/internal/convex"
+	"github.com/connor-kress/mind-graph/runner/internal/openrouter"
 	"github.com/connor-kress/mind-graph/runner/internal/transcribe"
 )
 
@@ -21,13 +24,12 @@ type Transcriber interface {
 	Transcribe(ctx context.Context, name, kind string, data []byte, dir string) (*transcribe.Result, error)
 }
 
-// Worker claims queued sources from Convex and transcribes them, one at a time.
+// Worker claims queued sources from Convex and transcribes them, as many at
+// once as it's given. Convex limits how many each user has running.
 type Worker struct {
 	Convex      *convex.Client
 	Transcriber Transcriber
-	// What the model requests so far have cost, in US dollars, to log per job. Optional.
-	Cost   func() float64
-	Config config.Config
+	Config      config.Config
 	// Where each job's files go while it runs. Empty uses the system's temporary directory.
 	WorkDir string
 
@@ -58,7 +60,11 @@ func (w *Worker) Run(ctx context.Context) error {
 		defer ticker.Stop()
 		tick = ticker.C
 	}
-	lastWork := time.Now()
+	var running, lastWork atomic.Int64
+	lastWork.Store(time.Now().UnixNano())
+	var jobs sync.WaitGroup
+	// When shutting down, jobs still running give themselves back first.
+	defer jobs.Wait()
 	for {
 		job, err := w.Convex.Claim(ctx)
 		switch {
@@ -70,15 +76,21 @@ func (w *Worker) Run(ctx context.Context) error {
 		case err != nil:
 			slog.Warn("couldn't ask for work", "error", err)
 		case job != nil:
-			w.process(ctx, job)
-			lastWork = time.Now()
+			running.Add(1)
+			jobs.Go(func() {
+				w.process(ctx, job)
+				lastWork.Store(time.Now().UnixNano())
+				running.Add(-1)
+				// Its user may have more waiting for this one to finish.
+				w.wake()
+			})
 			// There may be more.
 			continue
 		}
 
 		var idle <-chan time.Time
-		if w.Config.IdleExit > 0 {
-			left := w.Config.IdleExit - time.Since(lastWork)
+		if w.Config.IdleExit > 0 && running.Load() == 0 {
+			left := w.Config.IdleExit - time.Since(time.Unix(0, lastWork.Load()))
 			if left <= 0 {
 				slog.Info("no work for a while; exiting", "idle", w.Config.IdleExit)
 				return nil
@@ -92,6 +104,14 @@ func (w *Worker) Run(ctx context.Context) error {
 		case <-w.nudges:
 		case <-idle:
 		}
+	}
+}
+
+// wake has Run ask for work now rather than at its next poll.
+func (w *Worker) wake() {
+	select {
+	case w.nudges <- struct{}{}:
+	default:
 	}
 }
 
@@ -113,10 +133,7 @@ func (w *Worker) handler() http.Handler {
 			http.Error(rw, "bad signature", http.StatusUnauthorized)
 			return
 		}
-		select {
-		case w.nudges <- struct{}{}:
-		default:
-		}
+		w.wake()
 		rw.WriteHeader(http.StatusNoContent)
 	})
 	return mux
@@ -129,12 +146,9 @@ func (w *Worker) process(ctx context.Context, job *convex.Job) {
 	log := slog.With("source", job.SourceID, "name", job.Name)
 	log.Info("transcribing", "kind", job.Kind, "bytes", job.Size)
 	started := time.Now()
-	var startCost float64
-	if w.Cost != nil {
-		startCost = w.Cost()
-	}
 
-	jobCtx, cancel := context.WithCancelCause(ctx)
+	jobCtx, spent := openrouter.WithSpending(ctx)
+	jobCtx, cancel := context.WithCancelCause(jobCtx)
 	defer cancel(nil)
 	if w.Config.JobTimeout > 0 {
 		var stop context.CancelFunc
@@ -160,10 +174,7 @@ func (w *Worker) process(ctx context.Context, job *convex.Job) {
 	cancel(nil)
 	<-beats
 
-	attrs := []any{"seconds", time.Since(started).Round(time.Second).Seconds()}
-	if w.Cost != nil {
-		attrs = append(attrs, "cost_usd", w.Cost()-startCost)
-	}
+	attrs := []any{"seconds", time.Since(started).Round(time.Second).Seconds(), "cost_usd", spent.USD()}
 	// The claim's last requests get time of their own, even when shutting down.
 	finish, done := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer done()
@@ -280,17 +291,19 @@ func (w *Worker) transcribe(ctx context.Context, job *convex.Job) error {
 	if err != nil {
 		return err
 	}
-	var assets []convex.Asset
-	for _, a := range result.Assets {
+	assets := make([]convex.Asset, len(result.Assets))
+	err = transcribe.ForEach(ctx, len(assets), w.Config.Parallel, func(ctx context.Context, i int) error {
+		a := result.Assets[i]
 		data, err := os.ReadFile(a.Path)
 		if err != nil {
 			return err
 		}
 		id, err := w.Convex.Upload(ctx, job, a.ContentType, data)
-		if err != nil {
-			return err
-		}
-		assets = append(assets, convex.Asset{Name: a.ID, StorageID: id})
+		assets[i] = convex.Asset{Name: a.ID, StorageID: id}
+		return err
+	})
+	if err != nil {
+		return err
 	}
 	return w.Convex.Complete(ctx, job, markdownID, result.Pages, assets)
 }

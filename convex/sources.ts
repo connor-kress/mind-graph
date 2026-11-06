@@ -149,7 +149,7 @@ export const completeUpload = internalMutation({
     if (!(await canAdd(ctx, projectId, userId))) throw new ConvexError("Project not found");
     const file = await ctx.db.system.get(storageId);
     if (file?.size !== size) throw new ConvexError("The upload didn't finish");
-    return insertSource(ctx, projectId, storageId, name);
+    return insertSource(ctx, projectId, storageId, name, undefined, userId);
   },
 });
 
@@ -185,7 +185,13 @@ export const retry = mutation({
   handler: async (ctx, { sourceId }) => {
     const source = await requireSource(ctx, sourceId);
     if (source?.status !== "failed") return;
-    await ctx.db.patch(sourceId, { status: "queued", error: undefined, attempts: undefined });
+    const queuedBy = await requireUser(ctx);
+    await ctx.db.patch(sourceId, {
+      status: "queued",
+      queuedBy,
+      error: undefined,
+      attempts: undefined,
+    });
     await nudge(ctx);
   },
 });
@@ -227,6 +233,7 @@ async function insertSource(
   storageId: Id<"_storage">,
   name: string,
   title?: string,
+  queuedBy?: string,
 ) {
   const file = await ctx.db.system.get(storageId);
   if (!file) throw new ConvexError("The upload didn't finish");
@@ -245,6 +252,7 @@ async function insertSource(
     kind,
     size: file.size,
     status: note ? "ready" : "queued",
+    queuedBy: note ? undefined : queuedBy,
     markdownId: note ? storageId : undefined,
   });
 }

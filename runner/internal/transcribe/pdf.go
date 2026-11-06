@@ -48,7 +48,7 @@ func (t *PDF) Transcribe(ctx context.Context, _ string, data []byte, dir string)
 	size := t.Config.RangePages
 	parts := make([]part, (pages+size-1)/size)
 	var ids, crops atomic.Int64
-	err = forEach(ctx, len(parts), t.Config.Parallel, func(ctx context.Context, i int) error {
+	err = ForEach(ctx, len(parts), t.Config.Parallel, func(ctx context.Context, i int) error {
 		first, last := i*size+1, min((i+1)*size, pages)
 		var err error
 		parts[i].text, parts[i].assets, err = t.transcribeRange(ctx, path, first, last, dir, &ids, &crops)

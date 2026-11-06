@@ -19,6 +19,7 @@ import (
 
 	"github.com/connor-kress/mind-graph/runner/internal/config"
 	"github.com/connor-kress/mind-graph/runner/internal/convex"
+	"github.com/connor-kress/mind-graph/runner/internal/openrouter"
 	"github.com/connor-kress/mind-graph/runner/internal/transcribe"
 )
 
@@ -79,12 +80,18 @@ type fakeConvex struct {
 	lost bool
 	// Whether heartbeats find the claim lost.
 	lostOnHeartbeat bool
+	// How many jobs are queued, one if zero.
+	jobs int
+	// Whether a claim gets nothing, as when the user is at their limit. Optional.
+	held func(claimed int) bool
 
 	mu       sync.Mutex
-	claimed  bool
+	claimed  int
 	uploads  map[string]string
 	complete map[string]any
 	failed   map[string]any
+	// How many jobs have been completed or failed.
+	completes, fails int
 }
 
 func newFakeConvex(t *testing.T, file []byte) *fakeConvex {
@@ -104,16 +111,17 @@ func newFakeConvex(t *testing.T, file []byte) *fakeConvex {
 		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		if action != "claim" && (f.lost || in["token"] != "token-1" || action == "heartbeat" && f.lostOnHeartbeat) {
+		if action != "claim" && (f.lost || !strings.HasPrefix(in["token"].(string), "token-") || action == "heartbeat" && f.lostOnHeartbeat) {
 			http.Error(rw, "lost", http.StatusConflict)
 			return
 		}
 		switch action {
 		case "claim":
 			var job any
-			if !f.claimed {
-				f.claimed = true
-				job = convex.Job{SourceID: "source-1", Token: "token-1", Name: "Notes.pdf", Kind: "pdf",
+			if f.claimed < max(f.jobs, 1) && (f.held == nil || !f.held(f.claimed)) {
+				f.claimed++
+				n := strconv.Itoa(f.claimed)
+				job = convex.Job{SourceID: "source-" + n, Token: "token-" + n, Name: "Notes.pdf", Kind: "pdf",
 					Size: int64(len(f.file)), FileURL: f.server.URL + "/file", LeaseMS: f.leaseMS}
 			}
 			json.NewEncoder(rw).Encode(map[string]any{"job": job})
@@ -125,9 +133,11 @@ func newFakeConvex(t *testing.T, file []byte) *fakeConvex {
 			json.NewEncoder(rw).Encode(map[string]any{"expiresAt": 1})
 		case "complete":
 			f.complete = in
+			f.completes++
 			rw.Write([]byte("{}"))
 		case "fail":
 			f.failed = in
+			f.fails++
 			rw.Write([]byte("{}"))
 		}
 	})
@@ -153,7 +163,7 @@ func runOnce(t *testing.T, f *fakeConvex, tr Transcriber, stopAfter ...time.Dura
 	w := &Worker{
 		Convex:      &convex.Client{SiteURL: f.server.URL, Secret: "secret", HTTP: http.DefaultClient},
 		Transcriber: tr,
-		Config:      config.Config{RunnerSecret: "secret", PollInterval: 10 * time.Millisecond, IdleExit: 50 * time.Millisecond},
+		Config:      config.Config{RunnerSecret: "secret", PollInterval: 10 * time.Millisecond, IdleExit: 50 * time.Millisecond, Parallel: 2},
 		WorkDir:     t.TempDir(),
 	}
 	if err := w.Run(ctx); err != nil {
@@ -236,6 +246,109 @@ func TestWorkerUploadsTheResult(t *testing.T) {
 	}
 }
 
+func TestWorkerRunsEveryJobItIsGivenAtOnce(t *testing.T) {
+	f := newFakeConvex(t, []byte("%PDF"))
+	f.jobs = 5
+	var started sync.WaitGroup
+	started.Add(f.jobs)
+	runOnce(t, f, fakeTranscriber(func(ctx context.Context, _ string) (*transcribe.Result, error) {
+		// None finishes until all have started, which can't happen one at a time.
+		started.Done()
+		all := make(chan struct{})
+		go func() { started.Wait(); close(all) }()
+		select {
+		case <-all:
+			return &transcribe.Result{Markdown: "# Notes\n"}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}))
+	if f.completes != f.jobs || f.fails != 0 {
+		t.Errorf("%d of %d completed, %d failed", f.completes, f.jobs, f.fails)
+	}
+}
+
+func TestWorkerAsksForMoreWhenAJobFinishes(t *testing.T) {
+	f := newFakeConvex(t, []byte("%PDF"))
+	f.jobs = 2
+	// The second is held back until the first is done, as Convex does for a user at their limit.
+	f.held = func(claimed int) bool { return claimed == 1 && f.completes == 0 }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	second := make(chan struct{})
+	var calls atomic.Int64
+	w := &Worker{
+		Convex: &convex.Client{SiteURL: f.server.URL, Secret: "secret", HTTP: http.DefaultClient},
+		Transcriber: fakeTranscriber(func(context.Context, string) (*transcribe.Result, error) {
+			if calls.Add(1) == 2 {
+				close(second)
+			}
+			return &transcribe.Result{Markdown: "# Notes\n"}, nil
+		}),
+		// Far longer than the test, so only the first job's finishing can ask again.
+		Config:  config.Config{RunnerSecret: "secret", PollInterval: time.Hour, Parallel: 2},
+		WorkDir: t.TempDir(),
+	}
+	done := make(chan error)
+	go func() { done <- w.Run(ctx) }()
+	select {
+	case <-second:
+	case <-ctx.Done():
+		t.Error("the second job wasn't claimed when the first finished")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkerDoesntExitWhileAJobIsRunning(t *testing.T) {
+	f := newFakeConvex(t, []byte("%PDF"))
+	// Runs for longer than the idle timeout in runOnce.
+	runOnce(t, f, fakeTranscriber(func(ctx context.Context, _ string) (*transcribe.Result, error) {
+		select {
+		case <-time.After(200 * time.Millisecond):
+			return &transcribe.Result{Markdown: "# Notes\n"}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}))
+	if f.completes != 1 {
+		t.Errorf("%d completed, failed with %v", f.completes, f.failed)
+	}
+}
+
+func TestWorkerGivesEveryJobBackOnShutdown(t *testing.T) {
+	f := newFakeConvex(t, []byte("%PDF"))
+	f.jobs = 3
+	runOnce(t, f, untilCancelled, 100*time.Millisecond)
+	if f.fails != 3 || f.failed["release"] != true {
+		t.Errorf("%d given back: %v", f.fails, f.failed)
+	}
+}
+
+func TestEachJobLogsOnlyWhatItCost(t *testing.T) {
+	// Two jobs at once, with a request of their own, each seeing its own total.
+	ai := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		rw.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"cost":0.25}}`))
+	}))
+	defer ai.Close()
+	client := &openrouter.Client{URL: ai.URL, HTTP: http.DefaultClient}
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() {
+			ctx, spent := openrouter.WithSpending(context.Background())
+			if _, err := client.Complete(ctx, openrouter.Request{}); err != nil {
+				t.Error(err)
+			}
+			if spent.USD() != 0.25 {
+				t.Errorf("spent %v", spent.USD())
+			}
+		})
+	}
+	wg.Wait()
+}
+
 func TestWorkerReportsWhyAFileCantBeTranscribed(t *testing.T) {
 	f := newFakeConvex(t, []byte("%PDF"))
 	runOnce(t, f, fakeTranscriber(func(context.Context, string) (*transcribe.Result, error) {
@@ -274,7 +387,7 @@ func TestWorkerFailsAJobThatTakesTooLong(t *testing.T) {
 	w := &Worker{
 		Convex:      &convex.Client{SiteURL: f.server.URL, Secret: "secret", HTTP: http.DefaultClient},
 		Transcriber: untilCancelled,
-		Config:      config.Config{RunnerSecret: "secret", PollInterval: 10 * time.Millisecond, IdleExit: 50 * time.Millisecond, JobTimeout: 50 * time.Millisecond},
+		Config:      config.Config{RunnerSecret: "secret", PollInterval: 10 * time.Millisecond, IdleExit: 50 * time.Millisecond, JobTimeout: 50 * time.Millisecond, Parallel: 2},
 		WorkDir:     t.TempDir(),
 	}
 	if err := w.Run(ctx); err != nil {

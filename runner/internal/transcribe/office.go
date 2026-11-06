@@ -78,7 +78,7 @@ func formatUnits(ctx context.Context, ai *openrouter.Client, cfg config.Config, 
 		return "", UserError("This file has no text to transcribe.")
 	}
 	out := make([]string, len(chunks))
-	err := forEach(ctx, len(chunks), cfg.Parallel, func(ctx context.Context, i int) error {
+	err := ForEach(ctx, len(chunks), cfg.Parallel, func(ctx context.Context, i int) error {
 		var err error
 		out[i], err = formatText(ctx, ai, prompt, chunks[i])
 		return err
