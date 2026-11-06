@@ -30,7 +30,7 @@ const minAssetSide = 25
 
 // Longer sides, in pixels, of page renders: for previews, closer looks, and crops.
 const (
-	previewSize = 800
+	previewSize = 580
 	inspectSize = 1400
 	cropSize    = 2400
 	// maxBatch is how many images one tool call can ask for.
@@ -49,9 +49,6 @@ type pagesRun struct {
 	// Crops so far, across the document, and in this conversation.
 	crops   *atomic.Int64
 	cropped int64
-	// The last page rendered to crop from, by page.
-	cropPage   int
-	cropSource image.Image
 }
 
 // run returns the range's Markdown, with ## Page N sections counted within the range.
@@ -64,10 +61,6 @@ func (r *pagesRun) run(ctx context.Context, source string, first, last int) (str
 	if err := t.Tool.Split(ctx, source, first, last, r.pdf); err != nil {
 		return "", err
 	}
-	pdfData, err := os.ReadFile(r.pdf)
-	if err != nil {
-		return "", err
-	}
 	if err := r.findOriginals(ctx); err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
@@ -78,6 +71,11 @@ func (r *pagesRun) run(ctx context.Context, source string, first, last int) (str
 	}
 	// Before the inventory, which leaves out originals that can't be shown.
 	assetSheets := r.assetSheets()
+	// Read last, so it isn't held while the images are prepared.
+	pdfData, err := os.ReadFile(r.pdf)
+	if err != nil {
+		return "", err
+	}
 	content := []openrouter.Part{
 		openrouter.TextPart(t.Prompts.PDF + "\n\nInventory:\n" + r.inventory() + r.composedHints()),
 		openrouter.PDFPart(fmt.Sprintf("pages-%d-%d.pdf", first, last), pdfData),
@@ -367,6 +365,20 @@ func (r *pagesRun) assetSheets() []openrouter.Part {
 func (r *pagesRun) pageSheets(ctx context.Context) ([]openrouter.Part, []int) {
 	var tiles []tile
 	var missing []int
+	var parts []openrouter.Part
+	// Each sheet is encoded as soon as it's full, so a range doesn't hold all its thumbnails.
+	flush := func() {
+		if len(tiles) == 0 {
+			return
+		}
+		part, err := jpegPart(sheet(tiles, 2, 600, 500))
+		if err != nil {
+			slog.Warn("couldn't make a contact sheet", "error", err)
+		} else {
+			parts = append(parts, part)
+		}
+		tiles = nil
+	}
 	for n := 1; n <= r.pages && ctx.Err() == nil; n++ {
 		img, err := r.render(ctx, n, previewSize)
 		if err != nil {
@@ -375,22 +387,52 @@ func (r *pagesRun) pageSheets(ctx context.Context) ([]openrouter.Part, []int) {
 			continue
 		}
 		tiles = append(tiles, tile{withGrid(fit(img, 580, 470)), []string{fmt.Sprintf("PHYSICAL PDF PAGE %d", n)}})
-	}
-	var parts []openrouter.Part
-	for start := 0; start < len(tiles); start += 4 {
-		part, err := jpegPart(sheet(tiles[start:min(start+4, len(tiles))], 2, 600, 500))
-		if err != nil {
-			slog.Warn("couldn't make a contact sheet", "error", err)
-			continue
+		if len(tiles) == 4 {
+			flush()
 		}
-		parts = append(parts, part)
 	}
+	flush()
 	return parts, missing
 }
 
 func (r *pagesRun) render(ctx context.Context, page, size int) (image.Image, error) {
 	path := filepath.Join(r.dir, fmt.Sprintf("page-%d-%d.png", page, size))
 	if err := r.t.Tool.Render(ctx, r.pdf, page, size, path); err != nil {
+		return nil, err
+	}
+	return decodeImageFile(path)
+}
+
+// cropOfPage renders just a region of a page to path, without holding the whole page.
+func (r *pagesRun) cropOfPage(ctx context.Context, page int, box [4]float64, path string) (image.Image, error) {
+	// The whole page, on disk, tells the exact size a box is measured against,
+	// which depends on the tool's rounding and the page's rotation.
+	full := filepath.Join(r.dir, fmt.Sprintf("page-%d-%d.png", page, cropSize))
+	if _, err := os.Stat(full); err != nil {
+		// Under another name until it's whole, so a failure doesn't break later crops of the page.
+		partial := filepath.Join(r.dir, fmt.Sprintf("page-%d-%d-partial.png", page, cropSize))
+		if err := r.t.Tool.Render(ctx, r.pdf, page, cropSize, partial); err != nil {
+			os.Remove(partial)
+			return nil, err
+		}
+		if err := os.Rename(partial, full); err != nil {
+			return nil, err
+		}
+	}
+	f, err := os.Open(full)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	size, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return nil, err
+	}
+	region, err := pixelBox(box, size.Width, size.Height)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.t.Tool.RenderRegion(ctx, r.pdf, page, cropSize, region, path); err != nil {
 		return nil, err
 	}
 	return decodeImageFile(path)
@@ -523,46 +565,51 @@ func (r *pagesRun) crop(ctx context.Context, args region) (map[string]any, openr
 			r.crops.Add(-1)
 		}
 	}()
-	var src image.Image
-	var page int
-	var source string
-	var err error
-	if args.AssetID != "" {
-		a := r.assets[args.AssetID]
-		if a == nil {
-			return nil, none, fmt.Errorf("no asset %q", args.AssetID)
-		}
-		page, source = a.page, a.ID
-		src, err = decodeImageFile(a.Path)
-	} else {
+	box := [4]float64(args.BBox)
+	a := r.assets[args.AssetID]
+	if args.AssetID != "" && a == nil {
+		return nil, none, fmt.Errorf("no asset %q", args.AssetID)
+	}
+	if a == nil {
 		if err := r.checkPage(args.Page); err != nil {
 			return nil, none, err
 		}
-		page, source = args.Page, fmt.Sprintf("page %d", args.Page)
-		if r.cropPage != page {
-			r.cropSource, r.cropPage = nil, 0
-			if r.cropSource, err = r.render(ctx, page, cropSize); err == nil {
-				r.cropPage = page
-			}
-		}
-		src = r.cropSource
 	}
-	if err != nil {
-		return nil, none, err
-	}
-	box := [4]float64(args.BBox)
-	img, err := crop(src, box)
-	if err != nil {
-		return nil, none, err
-	}
-	data, err := encodePNG(img)
-	if err != nil {
+	if err := checkBox(box); err != nil {
 		return nil, none, err
 	}
 	id, seq := r.newID("crop")
 	path := filepath.Join(r.dir, id+".png")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return nil, none, err
+	defer func() {
+		if !cropped {
+			os.Remove(path)
+		}
+	}()
+	var img image.Image
+	var page int
+	var source string
+	if a != nil {
+		page, source = a.page, a.ID
+		src, err := decodeImageFile(a.Path)
+		if err != nil {
+			return nil, none, err
+		}
+		if img, err = crop(src, box); err != nil {
+			return nil, none, err
+		}
+		data, err := encodePNG(img)
+		if err != nil {
+			return nil, none, err
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			return nil, none, err
+		}
+	} else {
+		page, source = args.Page, fmt.Sprintf("page %d", args.Page)
+		var err error
+		if img, err = r.cropOfPage(ctx, page, box, path); err != nil {
+			return nil, none, err
+		}
 	}
 	b := img.Bounds()
 	r.assets[id] = &Asset{ID: id, seq: seq, page: page, Path: path, ContentType: "image/png", width: b.Dx(), height: b.Dy(), kind: "crop"}

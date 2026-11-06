@@ -2,7 +2,6 @@
 package openrouter
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -113,7 +112,6 @@ func (o *Client) Complete(ctx context.Context, r Request) (Completion, error) {
 		"max_tokens":  r.MaxTokens,
 		"temperature": 0,
 		"reasoning":   map[string]any{"effort": "none"},
-		"messages":    r.Messages,
 	}
 	if r.PDF {
 		body["plugins"] = []any{map[string]any{"id": "file-parser", "pdf": map[string]any{"engine": "native"}}}
@@ -123,7 +121,7 @@ func (o *Client) Complete(ctx context.Context, r Request) (Completion, error) {
 		body["tool_choice"] = "auto"
 		body["parallel_tool_calls"] = true
 	}
-	data, err := json.Marshal(body)
+	settings, err := json.Marshal(body)
 	if err != nil {
 		return Completion{}, err
 	}
@@ -143,7 +141,7 @@ func (o *Client) Complete(ctx context.Context, r Request) (Completion, error) {
 		}
 		var retry bool
 		var c Completion
-		c, retry, last = o.once(ctx, data)
+		c, retry, last = o.once(ctx, settings, r.Messages)
 		if last == nil || !retry {
 			return c, last
 		}
@@ -151,13 +149,51 @@ func (o *Client) Complete(ctx context.Context, r Request) (Completion, error) {
 	return Completion{}, last
 }
 
-func (o *Client) once(ctx context.Context, body []byte) (c Completion, retry bool, err error) {
+// writeBody writes the request a message at a time, so sending a long
+// conversation doesn't take a second copy of all its images.
+func writeBody(w io.Writer, settings []byte, messages []Message) error {
+	if _, err := w.Write(append(settings[:len(settings)-1:len(settings)-1], []byte(`,"messages":[`)...)); err != nil {
+		return err
+	}
+	for i, m := range messages {
+		data, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		if i > 0 {
+			if _, err := w.Write([]byte(",")); err != nil {
+				return err
+			}
+		}
+		if _, err := w.Write(data); err != nil {
+			return err
+		}
+	}
+	_, err := w.Write([]byte("]}"))
+	return err
+}
+
+func (o *Client) once(ctx context.Context, settings []byte, messages []Message) (c Completion, retry bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Minute)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.URL+"/chat/completions", bytes.NewReader(body))
+	newBody := func() (io.ReadCloser, error) {
+		body, pipe := io.Pipe()
+		// A body the transport never reads, such as one for a retry that doesn't
+		// happen, ends with the request, rather than holding the conversation.
+		stop := context.AfterFunc(ctx, func() { body.CloseWithError(ctx.Err()) })
+		go func() {
+			defer stop()
+			pipe.CloseWithError(writeBody(pipe, settings, messages))
+		}()
+		return body, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.URL+"/chat/completions", nil)
 	if err != nil {
 		return c, false, err
 	}
+	// So the transport can send it again, after a redirect or a lost connection.
+	req.GetBody = newBody
+	req.Body, _ = newBody()
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+o.Key)
 	resp, err := o.HTTP.Do(req)
