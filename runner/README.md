@@ -58,4 +58,33 @@ go vet ./...
 
 ## Production
 
-On a server, set `LISTEN=127.0.0.1:8090`, `POLL_INTERVAL=60s` and `IDLE_EXIT=0`, and put a reverse proxy such as Caddy in front of it for TLS. Setting `RUNNER_URL` on the deployment to the runner's public address makes Convex nudge it when a source is queued, so it doesn't wait for its next poll.
+The runner runs under systemd on the Ubuntu server `runelink.chat`, which it shares with RuneLink, so `deploy/mind-graph-runner.service` limits its memory and CPU. Most of a file's work is done by PDF tools on files anyone with an account uploads, so the unit also runs it as a throwaway user that can't write outside its temporary directory.
+
+To set up a server, install Poppler and write the settings to a file only root can read:
+
+```sh
+sudo apt-get install --no-install-recommends poppler-utils poppler-data fonts-urw-base35 fontconfig
+sudo install -m 600 /dev/stdin /etc/mind-graph-runner.env <<'EOF'
+CONVEX_SITE_URL=https://your-deployment.convex.site
+RUNNER_SECRET=
+OPENROUTER_API_KEY=
+EOF
+```
+
+Then, from your machine, build and start it. Do the same to deploy a new version. The runner tries to give back any running jobs and picks them up again; any it can't give back wait for their claims to run out:
+
+```sh
+runner/deploy/deploy.sh runelink.chat
+```
+
+The logs are in `journalctl -u mind-graph-runner`.
+
+Convex nudges the runner when a source is queued, so it doesn't wait for its next poll. For that, add it to `/etc/caddy/Caddyfile` for TLS, then reload Caddy:
+
+```
+runner.mindgraph.ckress.dev {
+	reverse_proxy 127.0.0.1:8090
+}
+```
+
+Then set `RUNNER_URL=https://runner.mindgraph.ckress.dev` on the deployment, and `RUNNER_SECRET` to the same value as the server's.
