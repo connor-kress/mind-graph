@@ -7,6 +7,14 @@ import { Markdown } from "../src/sources/Markdown";
 const render = (markdown: string) => renderToStaticMarkup(createElement(Markdown, null, markdown));
 
 describe("notes as rendered", () => {
+  test("display math the runner fences renders whole, also in a list", () => {
+    const html = render("- the vectors\n\n  $$\n  a_1,\\qquad\n  a_2\n  $$\n\n  are dependent");
+    expect(html).not.toContain("katex-error");
+    expect(html).toContain("katex-display");
+    expect(html).toContain("a_1");
+    expect(html).toMatch(/<p>are dependent<\/p>/);
+  });
+
   test("raw HTML is skipped and images are only placeholders", () => {
     const html = render(
       "<script>alert(1)</script>\n\nHi <b>there</b> ![Cat](https://example.com/cat.png)",
