@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -58,6 +59,23 @@ func (f fakePDF) Render(_ context.Context, _ string, page, size int, out string)
 	}
 	return os.WriteFile(out, data, 0o600)
 }
+
+// RenderRegion draws part of a page as Render does.
+func (f fakePDF) RenderRegion(_ context.Context, _ string, page, _ int, region image.Rectangle, out string) error {
+	if page == f.broken {
+		return fmt.Errorf("can't render page %d", page)
+	}
+	img := image.NewGray(image.Rect(0, 0, region.Dx(), region.Dy()))
+	for i := range img.Pix {
+		img.Pix[i] = byte(page * 10)
+	}
+	data, err := encodePNG(img)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(out, data, 0o600)
+}
+
 func (f fakePDF) Images(_ context.Context, _ string, _, _ int, dir string) ([]pdf.PlacedImage, error) {
 	if f.images == nil {
 		return nil, nil
@@ -616,6 +634,138 @@ func TestComposedHints(t *testing.T) {
 	if !strings.Contains(got, "Page 1 draws img1, img2 over each other") || !strings.Contains(got, "Page 1 draws img3, img8 over each other") || !strings.Contains(got, "img10") || strings.Contains(got, "Page 2") || strings.Contains(got, "Page 3") {
 		t.Errorf("hints = %q", got)
 	}
+}
+
+func TestFit(t *testing.T) {
+	// Half black and half white columns average to gray.
+	stripes := image.NewGray(image.Rect(0, 0, 4, 4))
+	for i := range stripes.Pix {
+		if i%2 == 1 {
+			stripes.Pix[i] = 255
+		}
+	}
+	got := fit(stripes, 2, 2).(*image.RGBA)
+	if got.Bounds().Dx() != 2 || got.RGBAAt(0, 0) != (color.RGBA{128, 128, 128, 255}) {
+		t.Errorf("%v: %v", got.Bounds(), got.RGBAAt(0, 0))
+	}
+	// A fractional ratio covers every source pixel once, so white stays white.
+	white := image.NewGray(image.Rect(0, 0, 7, 5))
+	for i := range white.Pix {
+		white.Pix[i] = 255
+	}
+	for _, p := range fit(white, 3, 3).(*image.RGBA).Pix {
+		if p != 255 {
+			t.Fatalf("white scaled to %d", p)
+		}
+	}
+	// Transparency goes on white, an image isn't scaled up, and its origin doesn't matter.
+	transparent := image.NewNRGBA(image.Rect(10, 20, 12, 22))
+	got = fit(transparent, 100, 100).(*image.RGBA)
+	if got.Bounds() != image.Rect(0, 0, 2, 2) || got.RGBAAt(1, 1) != (color.RGBA{255, 255, 255, 255}) {
+		t.Errorf("%v: %v", got.Bounds(), got.RGBAAt(1, 1))
+	}
+	// Scaling takes little beyond the result, however large the source.
+	large := image.NewRGBA(image.Rect(0, 0, 4000, 3000))
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	fit(large, 800, 600)
+	runtime.ReadMemStats(&after)
+	if used := after.TotalAlloc - before.TotalAlloc; used > 3<<20 {
+		t.Errorf("used %d MB", used>>20)
+	}
+}
+
+func TestACropRendersOnlyItsRegion(t *testing.T) {
+	var regions []image.Rectangle
+	r := &pagesRun{t: &PDF{Tool: regionRecorder{&regions}, Config: config.Config{MaxCrops: 10}}, pages: 1, dir: t.TempDir(),
+		assets: map[string]*Asset{}, ids: &atomic.Int64{}, crops: &atomic.Int64{}}
+	meta, _, err := r.crop(context.Background(), region{Page: 1, BBox: []float64{100, 200, 500, 800}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The page is twice as wide as it's tall, at the crop size.
+	want := image.Rect(cropSize/10, cropSize/10, cropSize/2, cropSize*2/5)
+	if len(regions) != 1 || regions[0] != want {
+		t.Errorf("regions = %v, want %v", regions, want)
+	}
+	if size := meta["size"].([]int); size[0] != want.Dx() || size[1] != want.Dy() {
+		t.Errorf("size = %v", size)
+	}
+}
+
+func TestACropsBoxIsCheckedAgainstTheRealPage(t *testing.T) {
+	var regions []image.Rectangle
+	dir := t.TempDir()
+	r := &pagesRun{t: &PDF{Tool: regionRecorder{&regions}, Config: config.Config{MaxCrops: 10}}, pages: 1, dir: dir,
+		assets: map[string]*Asset{}, ids: &atomic.Int64{}, crops: &atomic.Int64{}}
+	// Under one unit of 1000, but a pixel wide at the crop size.
+	if _, _, err := r.crop(context.Background(), region{Page: 1, BBox: []float64{0, 0, 0.4, 1000}}); err != nil {
+		t.Error(err)
+	}
+	// Empty even so; it doesn't use up the limit or leave a file.
+	if _, _, err := r.crop(context.Background(), region{Page: 1, BBox: []float64{0, 0, 0.1, 1000}}); err == nil {
+		t.Error("expected an error")
+	}
+	if r.crops.Load() != 1 {
+		t.Errorf("%d crops counted", r.crops.Load())
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "crop*"))
+	if len(files) != 1 {
+		t.Errorf("files: %v", files)
+	}
+}
+
+// failingOnce is a tool whose first render leaves a partial file and fails.
+type failingOnce struct {
+	regionRecorder
+	failed *bool
+}
+
+func (f failingOnce) Render(ctx context.Context, pdf string, page, size int, out string) error {
+	if !*f.failed {
+		*f.failed = true
+		os.WriteFile(out, []byte("\x89PNG"), 0o600)
+		return fmt.Errorf("the disk is full")
+	}
+	return f.regionRecorder.Render(ctx, pdf, page, size, out)
+}
+
+func TestAFailedRenderDoesntBreakLaterCropsOfThePage(t *testing.T) {
+	var regions []image.Rectangle
+	var failed bool
+	r := &pagesRun{t: &PDF{Tool: failingOnce{regionRecorder{&regions}, &failed}, Config: config.Config{MaxCrops: 10}}, pages: 1, dir: t.TempDir(),
+		assets: map[string]*Asset{}, ids: &atomic.Int64{}, crops: &atomic.Int64{}}
+	box := region{Page: 1, BBox: []float64{0, 0, 500, 500}}
+	if _, _, err := r.crop(context.Background(), box); err == nil {
+		t.Fatal("expected the first crop to fail")
+	}
+	if _, _, err := r.crop(context.Background(), box); err != nil {
+		t.Errorf("the second crop failed: %v", err)
+	}
+}
+
+// regionRecorder is a tool for a page twice as wide as it's tall, recording the regions it renders.
+type regionRecorder struct{ regions *[]image.Rectangle }
+
+func (regionRecorder) PageCount(context.Context, string) (int, error)        { return 1, nil }
+func (regionRecorder) Split(context.Context, string, int, int, string) error { return nil }
+func (regionRecorder) Images(context.Context, string, int, int, string) ([]pdf.PlacedImage, error) {
+	return nil, nil
+}
+func (regionRecorder) Render(_ context.Context, _ string, _, size int, out string) error {
+	data, err := encodePNG(image.NewGray(image.Rect(0, 0, size, size/2)))
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(out, data, 0o600)
+}
+func (r regionRecorder) RenderRegion(_ context.Context, _ string, _, _ int, region image.Rectangle, out string) error {
+	*r.regions = append(*r.regions, region)
+	data, err := encodePNG(image.NewGray(image.Rect(0, 0, region.Dx(), region.Dy())))
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(out, data, 0o600)
 }
 
 func TestWithGrid(t *testing.T) {

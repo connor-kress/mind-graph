@@ -16,11 +16,12 @@ import (
 )
 
 func decodeImageFile(path string) (image.Image, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	img, _, err := image.Decode(bytes.NewReader(data))
+	defer f.Close()
+	img, _, err := image.Decode(f)
 	return img, err
 }
 
@@ -36,29 +37,76 @@ func encodeJPEG(img image.Image) ([]byte, error) {
 	return b.Bytes(), err
 }
 
-// fit scales an image down, keeping its proportions, to fit within w by h.
+// fit scales an image down, keeping its proportions, to fit within w by h, on
+// white. Each output pixel averages the source pixels it covers, reading a row
+// at a time, so scaling takes little memory beyond the result.
 func fit(img image.Image, w, h int) image.Image {
 	b := img.Bounds()
 	scale := min(float64(w)/float64(b.Dx()), float64(h)/float64(b.Dy()), 1)
-	out := image.NewRGBA(image.Rect(0, 0, max(1, int(float64(b.Dx())*scale)), max(1, int(float64(b.Dy())*scale))))
-	draw.Draw(out, out.Bounds(), image.White, image.Point{}, draw.Src)
-	draw.CatmullRom.Scale(out, out.Bounds(), img, b, draw.Over, nil)
+	dw, dh := max(1, int(float64(b.Dx())*scale)), max(1, int(float64(b.Dy())*scale))
+	out := image.NewRGBA(image.Rect(0, 0, dw, dh))
+	sx, sy := float64(b.Dx())/float64(dw), float64(b.Dy())/float64(dh)
+	row := image.NewRGBA(image.Rect(0, 0, b.Dx(), 1))
+	sum := make([]float64, dw*3)
+	for j := range dh {
+		clear(sum)
+		top, bottom := float64(j)*sy, float64(j+1)*sy
+		for y := int(top); float64(y) < bottom && y < b.Dy(); y++ {
+			height := min(float64(y+1), bottom) - max(float64(y), top)
+			draw.Draw(row, row.Bounds(), image.White, image.Point{}, draw.Src)
+			draw.Draw(row, row.Bounds(), img, image.Pt(b.Min.X, b.Min.Y+y), draw.Over)
+			for i := range dw {
+				left, right := float64(i)*sx, float64(i+1)*sx
+				for x := int(left); float64(x) < right && x < b.Dx(); x++ {
+					weight := height * (min(float64(x+1), right) - max(float64(x), left))
+					for c := range 3 {
+						sum[i*3+c] += weight * float64(row.Pix[x*4+c])
+					}
+				}
+			}
+		}
+		for i := range dw {
+			p := out.Pix[j*out.Stride+i*4:]
+			for c := range 3 {
+				p[c] = byte(sum[i*3+c]/(sx*sy) + 0.5)
+			}
+			p[3] = 255
+		}
+	}
 	return out
+}
+
+// checkBox checks a box given from 0 to 1000.
+func checkBox(box [4]float64) error {
+	if !(0 <= box[0] && box[0] < box[2] && box[2] <= 1000 && 0 <= box[1] && box[1] < box[3] && box[3] <= 1000) {
+		return fmt.Errorf("bbox must be [left, top, right, bottom] within 0..1000, with left < right and top < bottom")
+	}
+	return nil
+}
+
+// pixelBox converts a box given from 0 to 1000 of a width and height to pixels.
+func pixelBox(box [4]float64, w, h int) (image.Rectangle, error) {
+	if err := checkBox(box); err != nil {
+		return image.Rectangle{}, err
+	}
+	r := image.Rect(
+		int(box[0]*float64(w)/1000), int(box[1]*float64(h)/1000),
+		int(box[2]*float64(w)/1000+0.5), int(box[3]*float64(h)/1000+0.5),
+	)
+	if r.Dx() < 1 || r.Dy() < 1 {
+		return image.Rectangle{}, fmt.Errorf("the crop is empty")
+	}
+	return r, nil
 }
 
 // crop cuts out a box given from 0 to 1000 of the image's width and height.
 func crop(img image.Image, box [4]float64) (image.Image, error) {
-	if !(0 <= box[0] && box[0] < box[2] && box[2] <= 1000 && 0 <= box[1] && box[1] < box[3] && box[3] <= 1000) {
-		return nil, fmt.Errorf("bbox must be [left, top, right, bottom] within 0..1000, with left < right and top < bottom")
-	}
 	b := img.Bounds()
-	r := image.Rect(
-		b.Min.X+int(box[0]*float64(b.Dx())/1000), b.Min.Y+int(box[1]*float64(b.Dy())/1000),
-		b.Min.X+int(box[2]*float64(b.Dx())/1000+0.5), b.Min.Y+int(box[3]*float64(b.Dy())/1000+0.5),
-	)
-	if r.Dx() < 1 || r.Dy() < 1 {
-		return nil, fmt.Errorf("the crop is empty")
+	r, err := pixelBox(box, b.Dx(), b.Dy())
+	if err != nil {
+		return nil, err
 	}
+	r = r.Add(b.Min)
 	out := image.NewRGBA(image.Rect(0, 0, r.Dx(), r.Dy()))
 	draw.Draw(out, out.Bounds(), img, r.Min, draw.Src)
 	return out, nil

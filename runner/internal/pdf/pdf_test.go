@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"image"
+	_ "image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,6 +67,17 @@ func TestPoppler(t *testing.T) {
 	if data, err := os.ReadFile(page); err != nil || !bytes.HasPrefix(data, []byte("\x89PNG")) {
 		t.Errorf("render: %v", err)
 	}
+	region := filepath.Join(dir, "region.png")
+	if err := tool.RenderRegion(ctx, pdf, 1, 50, image.Rect(5, 10, 25, 20), region); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(region)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || size.Width != 20 || size.Height != 10 {
+		t.Errorf("region: %+v, %v", size, err)
+	}
 	images, err := tool.Images(ctx, pdf, 1, 3, dir)
 	if err != nil || len(images) == 0 {
 		t.Fatalf("Images = %v, %v", images, err)
@@ -96,5 +109,89 @@ func TestHugeImage(t *testing.T) {
 	}
 	if hugeImage(images(20, 5000, 4000)) || !hugeImage(images(21, 5000, 4000)) {
 		t.Error("more than 400 MP in all is too many")
+	}
+}
+
+// testPDF writes a one-page PDF with a dark bar off to one side, so a region taken
+// from the wrong place doesn't match, on a page with the given rotation.
+func testPDF(t *testing.T, rotate int) string {
+	t.Helper()
+	content := "0 0 0 rg 100 500 200 150 re f"
+	objects := []string{
+		"<</Type/Catalog/Pages 2 0 R>>",
+		"<</Type/Pages/Kids[3 0 R]/Count 1>>",
+		fmt.Sprintf("<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Rotate %d/Contents 4 0 R>>", rotate),
+		fmt.Sprintf("<</Length %d>>stream\n%s\nendstream", len(content), content),
+	}
+	var b bytes.Buffer
+	b.WriteString("%PDF-1.4\n")
+	var offsets []int
+	for i, o := range objects {
+		offsets = append(offsets, b.Len())
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, o)
+	}
+	xref := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(objects)+1)
+	for _, o := range offsets {
+		fmt.Fprintf(&b, "%010d 00000 n \n", o)
+	}
+	fmt.Fprintf(&b, "trailer<</Size %d/Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xref)
+	path := filepath.Join(t.TempDir(), "test.pdf")
+	if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func decodePNG(t *testing.T, path string) image.Image {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	img, _, err := image.Decode(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return img
+}
+
+func TestARegionMatchesThatPartOfTheFullRender(t *testing.T) {
+	if _, err := exec.LookPath("pdftoppm"); err != nil {
+		t.Skip("poppler-utils isn't installed")
+	}
+	for _, rotate := range []int{0, 90} {
+		ctx, dir, tool, pdf := context.Background(), t.TempDir(), poppler{}, testPDF(t, rotate)
+		fullPath, regionPath := filepath.Join(dir, "full.png"), filepath.Join(dir, "region.png")
+		if err := tool.Render(ctx, pdf, 1, 400, fullPath); err != nil {
+			t.Fatal(err)
+		}
+		full := decodePNG(t, fullPath)
+		// Across the bar's edges, so it holds both dark and light pixels.
+		var dark image.Point
+		for y := range full.Bounds().Dy() {
+			for x := range full.Bounds().Dx() {
+				if r, _, _, _ := full.At(x, y).RGBA(); r < 1<<15 && dark == (image.Point{}) {
+					dark = image.Pt(x, y)
+				}
+			}
+		}
+		box := image.Rect(dark.X-10, dark.Y-10, dark.X+30, dark.Y+20)
+		if err := tool.RenderRegion(ctx, pdf, 1, 400, box, regionPath); err != nil {
+			t.Fatal(err)
+		}
+		region := decodePNG(t, regionPath)
+		if region.Bounds().Dx() != box.Dx() || region.Bounds().Dy() != box.Dy() {
+			t.Fatalf("rotate %d: region is %v, want %v", rotate, region.Bounds(), box)
+		}
+		for y := range box.Dy() {
+			for x := range box.Dx() {
+				got, want := fmt.Sprint(region.At(x, y)), fmt.Sprint(full.At(box.Min.X+x, box.Min.Y+y))
+				if got != want {
+					t.Fatalf("rotate %d: pixel %d,%d is %v, want %v", rotate, x, y, got, want)
+				}
+			}
+		}
 	}
 }

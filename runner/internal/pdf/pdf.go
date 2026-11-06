@@ -7,6 +7,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"os"
 	"os/exec"
@@ -25,6 +26,8 @@ type Tool interface {
 	Split(ctx context.Context, pdf string, first, last int, out string) error
 	// Render writes a page as a PNG, scaled so its longer side is size pixels.
 	Render(ctx context.Context, pdf string, page, size int, out string) error
+	// RenderRegion writes part of a page as a PNG, given in the pixels of a Render at size.
+	RenderRegion(ctx context.Context, pdf string, page, size int, region image.Rectangle, out string) error
 	// Images extracts the bitmaps drawn on pages first to last into dir, at their own resolution.
 	Images(ctx context.Context, pdf string, first, last int, dir string) ([]PlacedImage, error)
 }
@@ -122,6 +125,14 @@ func (p poppler) Split(ctx context.Context, pdf string, first, last int, out str
 func (poppler) Render(ctx context.Context, pdf string, page, size int, out string) error {
 	n := strconv.Itoa(page)
 	_, err := run(ctx, "pdftoppm", "-png", "-scale-to", strconv.Itoa(size), "-f", n, "-l", n, "-singlefile", pdf, strings.TrimSuffix(out, ".png"))
+	return err
+}
+
+func (poppler) RenderRegion(ctx context.Context, pdf string, page, size int, region image.Rectangle, out string) error {
+	n := strconv.Itoa(page)
+	_, err := run(ctx, "pdftoppm", "-png", "-scale-to", strconv.Itoa(size), "-f", n, "-l", n, "-singlefile",
+		"-x", strconv.Itoa(region.Min.X), "-y", strconv.Itoa(region.Min.Y), "-W", strconv.Itoa(region.Dx()), "-H", strconv.Itoa(region.Dy()),
+		pdf, strings.TrimSuffix(out, ".png"))
 	return err
 }
 
