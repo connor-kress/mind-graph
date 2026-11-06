@@ -24,6 +24,37 @@ func TestRenumber(t *testing.T) {
 	}
 }
 
+func TestFenceMath(t *testing.T) {
+	for _, c := range []struct{ name, in, want string }{
+		{"spanning lines", "$$a,\\qquad\nb$$", "$$\na,\\qquad\nb\n$$"},
+		{"in a list item", "- x\n\n  $$a,\n  b,\n  c$$\n\n  y", "- x\n\n  $$\n  a,\n  b,\n  c\n  $$\n\n  y"},
+		{"starting a list item", "- $$a,\n  b$$", "- $$\n  a,\n  b\n  $$"},
+		{"starting a numbered item", "12. $$a,\n    b$$", "12. $$\n    a,\n    b\n    $$"},
+		{"closing on its own line", "$$a,\nb\n$$", "$$\na,\nb\n$$"},
+		{"already fenced", "$$\na\nb\n$$", "$$\na\nb\n$$"},
+		{"on one line", "$$a$$\n\n$$b$$", "$$a$$\n\n$$b$$"},
+		{"inline, then one line", "$a$ and\n$$b$$", "$a$ and\n$$b$$"},
+		{"with a blank line inside", "$$a\n\nb\n$$", "$$\na\n\nb\n$$"},
+		{"with Windows line endings", "$$a,\r\nb$$\r\n", "$$\na,\nb\n$$\n"},
+		{"in a quote", "> $$a\n> b$$", "> $$\n> a\n> b\n> $$"},
+		{"in a code block", "```\n$$a\nb$$\n```\n$$c\nd$$", "```\n$$a\nb$$\n```\n$$\nc\nd\n$$"},
+		{"in a code block holding another fence", "~~~\n```\n$$a\nb$$\n~~~", "~~~\n```\n$$a\nb$$\n~~~"},
+		{"never closed", "$$a\nb", "$$\na\nb"},
+		{"in a longer code fence", "````\n```\n$$a\nb$$\n````", "````\n```\n$$a\nb$$\n````"},
+		{"in code opening a list item", "- ```text\n  $$a\n  b$$\n  ```", "- ```text\n  $$a\n  b$$\n  ```"},
+		{"after a code fence that has closed", "```go\nx\n```\n\n$$a\nb$$", "```go\nx\n```\n\n$$\na\nb\n$$"},
+		{"not closed in a quote, before code", "> $$a\n> b\n\n```\n$$c\nd$$\n```", "> $$\n> a\n> b\n\n```\n$$c\nd$$\n```"},
+		{"not closed in a list, before more text", "- $$a\n  b\n\nText\n\n$$c\nd$$", "- $$\n  a\n  b\n\nText\n\n$$\nc\nd\n$$"},
+		{"with longer delimiters", "$$$\nx\n$$$", "$$$\nx\n$$$"},
+		{"closing with a longer delimiter", "$$\na\n$$$", "$$\na\n$$$"},
+		{"each of two", "$$a\nb$$\n\n$$c\nd$$", "$$\na\nb\n$$\n\n$$\nc\nd\n$$"},
+	} {
+		if got := fenceMath(c.in); got != c.want {
+			t.Errorf("%s: fenceMath(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
 func TestLinkAssets(t *testing.T) {
 	md := `![A](asset:img1) ![B](asset:missing) ![A again](asset:img1 "title") ![C](asset:crop2) ![D](https://x.test/d.png) ![Bare](img1 "title") ![Invented](crop9) ![Logo](logo) ![Path](d.png) ![Placeholder](crop? )`
 	known := func(id string) bool { return id == "img1" || id == "crop2" }

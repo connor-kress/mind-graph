@@ -87,7 +87,7 @@ func formatUnits(ctx context.Context, ai *openrouter.Client, cfg config.Config, 
 		return "", err
 	}
 	// Nothing to link to, so any links the model made anyway are dropped.
-	md, _ := linkAssets(strings.Join(out, "\n\n")+"\n", func(string) bool { return false })
+	md, _ := linkAssets(fenceMath(strings.Join(out, "\n\n"))+"\n", func(string) bool { return false })
 	return md, nil
 }
 

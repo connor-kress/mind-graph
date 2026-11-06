@@ -66,7 +66,7 @@ func (t *PDF) Transcribe(ctx context.Context, _ string, data []byte, dir string)
 			assets[a.ID] = a
 		}
 	}
-	md, used := linkAssets(strings.TrimSpace(text.String())+"\n", func(id string) bool { return assets[id] != nil })
+	md, used := linkAssets(fenceMath(strings.TrimSpace(text.String()))+"\n", func(id string) bool { return assets[id] != nil })
 	if len(used) > maxAssets {
 		allowed := map[string]bool{}
 		for _, id := range used[:maxAssets] {
