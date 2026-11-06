@@ -78,6 +78,9 @@ func TestPoppler(t *testing.T) {
 	if size, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || size.Width != 20 || size.Height != 10 {
 		t.Errorf("region: %+v, %v", size, err)
 	}
+	if largest, err := tool.LargestImage(ctx, pdf); err != nil || largest == 0 {
+		t.Errorf("LargestImage = %d, %v", largest, err)
+	}
 	images, err := tool.Images(ctx, pdf, 1, 3, dir)
 	if err != nil || len(images) == 0 {
 		t.Fatalf("Images = %v, %v", images, err)

@@ -2,18 +2,63 @@ package transcribe
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"os"
+	"runtime"
 
 	"golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
 )
+
+// largeImagePixels is the size from which a decoded image takes tens of
+// megabytes. Files that small can decode to this, so it's measured in pixels.
+const largeImagePixels = 8_000_000
+
+// largeImages is the one turn at holding a large image.
+var largeImages = make(chan struct{}, 1)
+
+// withImageFile decodes an image for use while it's held. Large ones take turns
+// across all jobs, so the memory they take at once doesn't grow with the jobs running.
+func withImageFile(ctx context.Context, path string, use func(image.Image) error) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return err
+	}
+	if cfg.Width*cfg.Height >= largeImagePixels {
+		select {
+		case largeImages <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		defer func() { <-largeImages }()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// Before the next one's turn, so it doesn't land on top of this one's garbage.
+		defer runtime.GC()
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	img, _, err := image.Decode(f)
+	if err != nil {
+		return err
+	}
+	return use(img)
+}
 
 func decodeImageFile(path string) (image.Image, error) {
 	f, err := os.Open(path)

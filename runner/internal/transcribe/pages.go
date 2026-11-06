@@ -70,7 +70,7 @@ func (r *pagesRun) run(ctx context.Context, source string, first, last int) (str
 		clear(r.assets)
 	}
 	// Before the inventory, which leaves out originals that can't be shown.
-	assetSheets := r.assetSheets()
+	assetSheets := r.assetSheets(ctx)
 	// Read last, so it isn't held while the images are prepared.
 	pdfData, err := os.ReadFile(r.pdf)
 	if err != nil {
@@ -328,7 +328,7 @@ func (r *pagesRun) sorted() []*Asset {
 // scale down, so their text can be read. It leaves out any that can't be
 // decoded. Each sheet is encoded as soon as it's full, so a range with many
 // originals doesn't hold all their thumbnails.
-func (r *pagesRun) assetSheets() []openrouter.Part {
+func (r *pagesRun) assetSheets(ctx context.Context) []openrouter.Part {
 	var parts []openrouter.Part
 	var tiles []tile
 	flush := func() {
@@ -344,14 +344,21 @@ func (r *pagesRun) assetSheets() []openrouter.Part {
 		tiles = nil
 	}
 	for _, a := range r.sorted() {
-		img, err := decodeImageFile(a.Path)
+		if ctx.Err() != nil {
+			return nil
+		}
+		// Only the thumbnail is kept, not the decoded original.
+		var thumb image.Image
+		err := withImageFile(ctx, a.Path, func(img image.Image) error {
+			thumb = fit(img, 800, 600)
+			return nil
+		})
 		if err != nil {
 			slog.Warn("leaving out an image that can't be decoded", "asset", a.ID, "error", err)
 			delete(r.assets, a.ID)
 			continue
 		}
-		// Only the thumbnail is kept, not the decoded original.
-		tiles = append(tiles, tile{fit(img, 800, 600), []string{a.ID, fmt.Sprintf("page %d | %dx%d | %s", a.page, a.width, a.height, a.kind)}})
+		tiles = append(tiles, tile{thumb, []string{a.ID, fmt.Sprintf("page %d | %dx%d | %s", a.page, a.width, a.height, a.kind)}})
 		if len(tiles) == 2 {
 			flush()
 		}
@@ -469,7 +476,7 @@ func (r *pagesRun) tool(ctx context.Context, call openrouter.ToolCall) (map[stri
 		var results []map[string]any
 		var parts []openrouter.Part
 		for _, id := range args.AssetIDs {
-			result, part, err := r.inspect(id)
+			result, part, err := r.inspect(ctx, id)
 			if err != nil {
 				results = append(results, map[string]any{"asset_id": id, "error": err.Error()})
 				continue
@@ -530,16 +537,16 @@ func (r *pagesRun) checkPage(n int) error {
 	return nil
 }
 
-func (r *pagesRun) inspect(id string) (map[string]any, openrouter.Part, error) {
+func (r *pagesRun) inspect(ctx context.Context, id string) (map[string]any, openrouter.Part, error) {
 	a := r.assets[id]
 	if a == nil {
 		return nil, openrouter.Part{}, fmt.Errorf("no asset %q", id)
 	}
-	img, err := decodeImageFile(a.Path)
-	if err != nil {
-		return nil, openrouter.Part{}, err
-	}
-	part, err := jpegPart(fit(img, 1600, 1600))
+	var part openrouter.Part
+	err := withImageFile(ctx, a.Path, func(img image.Image) (err error) {
+		part, err = jpegPart(fit(img, 1600, 1600))
+		return err
+	})
 	return map[string]any{"asset_id": a.ID, "kind": a.kind, "size": []int{a.width, a.height}}, part, err
 }
 
@@ -585,36 +592,46 @@ func (r *pagesRun) crop(ctx context.Context, args region) (map[string]any, openr
 			os.Remove(path)
 		}
 	}()
-	var img image.Image
 	var page int
 	var source string
+	var b image.Rectangle
+	var part openrouter.Part
+	show := func(img image.Image) (err error) {
+		b = img.Bounds()
+		part, err = jpegPart(fit(img, 1600, 1600))
+		return err
+	}
 	if a != nil {
 		page, source = a.page, a.ID
-		src, err := decodeImageFile(a.Path)
+		err := withImageFile(ctx, a.Path, func(src image.Image) error {
+			img, err := crop(src, box)
+			if err != nil {
+				return err
+			}
+			data, err := encodePNG(img)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				return err
+			}
+			return show(img)
+		})
 		if err != nil {
-			return nil, none, err
-		}
-		if img, err = crop(src, box); err != nil {
-			return nil, none, err
-		}
-		data, err := encodePNG(img)
-		if err != nil {
-			return nil, none, err
-		}
-		if err := os.WriteFile(path, data, 0o600); err != nil {
 			return nil, none, err
 		}
 	} else {
 		page, source = args.Page, fmt.Sprintf("page %d", args.Page)
-		var err error
-		if img, err = r.cropOfPage(ctx, page, box, path); err != nil {
+		img, err := r.cropOfPage(ctx, page, box, path)
+		if err != nil {
+			return nil, none, err
+		}
+		if err := show(img); err != nil {
 			return nil, none, err
 		}
 	}
-	b := img.Bounds()
 	r.assets[id] = &Asset{ID: id, seq: seq, page: page, Path: path, ContentType: "image/png", width: b.Dx(), height: b.Dy(), kind: "crop"}
 	cropped = true
 	r.cropped++
-	part, err := jpegPart(fit(img, 1600, 1600))
-	return map[string]any{"asset_id": id, "kind": "crop", "source": source, "bbox_normalized": box, "size": []int{b.Dx(), b.Dy()}}, part, err
+	return map[string]any{"asset_id": id, "kind": "crop", "source": source, "bbox_normalized": box, "size": []int{b.Dx(), b.Dy()}}, part, nil
 }
