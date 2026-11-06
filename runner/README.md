@@ -32,16 +32,16 @@ Word and PowerPoint files are read as XML, so only their text is transcribed: up
 
 ## Development
 
-Install Go 1.26 and Poppler (`sudo dnf install poppler-utils`), then:
+Install Go 1.26, Poppler (`sudo dnf install poppler-utils`), and [watchexec](https://github.com/watchexec/watchexec) (`cargo install watchexec-cli`), then:
 
 ```sh
 cd runner
 cp .env.example .env.local  # Then fill it in
 pnpm exec convex env set --deployment dev RUNNER_SECRET <the same secret>  # Once, on your dev deployment
-go run .
+pnpm dev:runner
 ```
 
-With the example settings, it asks for work every 5 seconds and exits after 30 minutes without any. Upload a PDF in the app to see it work.
+With the example settings, it asks for work every 5 seconds and exits after 30 minutes without any. Saving a Go file or prompt restarts it, also after it has exited, and it tries to give back any source it's working on, whose claim otherwise runs out. Once it has exited, a new upload waits for that or a manual restart, which `.env.local` changes also need. Upload a PDF in the app to see it work.
 
 To tune the prompts, transcribe a file locally, without Convex:
 
