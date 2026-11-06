@@ -537,6 +537,187 @@ describe("finishing", () => {
   });
 });
 
+describe("transcription runs", () => {
+  const ALICE = "https://clerk.test|alice";
+
+  const runs = (t: T, sourceId: Id<"sources">) =>
+    t.run((ctx) =>
+      ctx.db
+        .query("transcriptionRuns")
+        .withIndex("by_claim", (q) => q.eq("sourceId", sourceId))
+        .collect(),
+    );
+
+  async function finish(t: T, job: { sourceId: Id<"sources">; token: string }, costUsd: number) {
+    const markdownId = await upload(t, job, MARKDOWN, "# Notes");
+    return call(t, "/runner/complete", { ...job, markdownId, assets: [], costUsd });
+  }
+
+  const fail = (t: T, job: { sourceId: Id<"sources">; token: string }, costUsd: number) =>
+    call(t, "/runner/fail", { ...job, error: "Nope", costUsd });
+
+  /** What the notes list says about a source's runs, or null if it doesn't list it. */
+  async function statsOf(
+    user: Awaited<ReturnType<typeof fixture>>["alice"],
+    projectId: Id<"projects">,
+    sourceId: Id<"sources">,
+  ) {
+    const sources = await user.query(api.sources.list, { projectId });
+    return sources.find((listed) => listed._id === sourceId)?.runStats ?? null;
+  }
+
+  test("records when a transcription started and ended, and what it cost", async () => {
+    const { t, alice, projectId } = await fixture();
+    const sourceId = await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    expect(await statsOf(alice, projectId, sourceId)).toBeNull();
+
+    const before = Date.now();
+    const job = (await claim(t))!;
+    // Nothing to show while its first run is going.
+    expect(await statsOf(alice, projectId, sourceId)).toBeNull();
+
+    vi.advanceTimersByTime(30_000);
+    await finish(t, job, 0.12);
+    const [run] = await runs(t, sourceId);
+    expect(run).toMatchObject({
+      token: job.token,
+      userId: ALICE,
+      costUsd: 0.12,
+      outcome: "ready",
+    });
+    expect(run.startedAt).toBeGreaterThanOrEqual(before);
+    expect(run.startedAt).toBeLessThan(before + 1000);
+    expect(run.endedAt! - run.startedAt).toBeGreaterThanOrEqual(30_000);
+
+    const stats = await statsOf(alice, projectId, sourceId);
+    expect(stats).toMatchObject({ retries: 0, totalCostUsd: 0.12 });
+    expect(stats?.latest).toMatchObject({ costUsd: 0.12 });
+    expect(stats?.latest?.durationMs).toBe(run.endedAt! - run.startedAt);
+    expect(stats?.totalDurationMs).toBe(stats?.latest?.durationMs);
+  });
+
+  test("adds up retries, showing the latest run", async () => {
+    const { t, alice, projectId } = await fixture();
+    const sourceId = await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    const first = (await claim(t))!;
+    vi.advanceTimersByTime(5000);
+    await fail(t, first, 0.02);
+    expect((await runs(t, sourceId))[0].outcome).toBe("failed");
+
+    await alice.mutation(api.sources.retry, { sourceId });
+    const second = (await claim(t))!;
+    // The retry shows, but counts for nothing else until it reports.
+    const during = await statsOf(alice, projectId, sourceId);
+    expect(during).toMatchObject({ retries: 1, totalCostUsd: 0.02 });
+    expect(during?.latest?.costUsd).toBe(0.02);
+
+    await finish(t, second, 0.05);
+    const stats = await statsOf(alice, projectId, sourceId);
+    expect(stats?.retries).toBe(1);
+    expect(stats?.latest?.costUsd).toBe(0.05);
+    expect(stats?.totalCostUsd).toBeCloseTo(0.07);
+    expect(stats?.totalDurationMs).toBeGreaterThan(stats!.latest!.durationMs);
+  });
+
+  test("counts a job given back as a run, though not as one of its tries", async () => {
+    const { t, alice, projectId } = await fixture();
+    const sourceId = await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    await call(t, "/runner/fail", { ...(await claim(t))!, release: true, costUsd: 0.01 });
+    expect((await runs(t, sourceId))[0].outcome).toBe("released");
+    expect((await source(t, sourceId))?.attempts).toBe(0);
+
+    await finish(t, (await claim(t))!, 0.02);
+    expect(await statsOf(alice, projectId, sourceId)).toMatchObject({ retries: 1 });
+  });
+
+  test("a run that crashed counts as a retry, with no cost or time", async () => {
+    const { t, alice, projectId } = await fixture();
+    const sourceId = await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    await claim(t);
+    vi.advanceTimersByTime(LEASE_MS + 1);
+    const second = (await claim(t))!;
+
+    const [crashed] = await runs(t, sourceId).then((all) =>
+      all.filter(({ token }) => token !== second.token),
+    );
+    expect(crashed).toMatchObject({ outcome: "lost" });
+    expect(crashed.endedAt).toBeUndefined();
+    expect(crashed.costUsd).toBeUndefined();
+    expect(await statsOf(alice, projectId, sourceId)).toEqual({
+      retries: 1,
+      latest: null,
+      totalCostUsd: 0,
+      totalDurationMs: 0,
+    });
+
+    await finish(t, second, 0.03);
+    const stats = await statsOf(alice, projectId, sourceId);
+    expect(stats).toMatchObject({ retries: 1, totalCostUsd: 0.03 });
+    expect(stats?.totalDurationMs).toBe(stats?.latest?.durationMs);
+  });
+
+  test("a lost run can still report, without taking over as the latest", async () => {
+    const { t, alice, projectId } = await fixture();
+    const sourceId = await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    const first = (await claim(t))!;
+    vi.advanceTimersByTime(LEASE_MS + 1);
+    await finish(t, (await claim(t))!, 0.03);
+    await call(t, "/runner/charge", { ...first, costUsd: 0.01 });
+
+    const stats = await statsOf(alice, projectId, sourceId);
+    expect(stats?.latest?.costUsd).toBe(0.03);
+    expect(stats?.totalCostUsd).toBeCloseTo(0.04);
+    const lost = (await runs(t, sourceId)).find(({ token }) => token === first.token);
+    expect(lost).toMatchObject({ outcome: "lost", costUsd: 0.01 });
+    expect(lost?.endedAt).toBeDefined();
+  });
+
+  test("a result arriving after its lease ran out is a lost run", async () => {
+    const { t, projectId } = await fixture();
+    const sourceId = await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    const job = (await claim(t))!;
+    vi.advanceTimersByTime(LEASE_MS + 1);
+    expect((await fail(t, job, 0.01)).status).toBe(409);
+    await call(t, "/runner/charge", { ...job, costUsd: 0.01 });
+    expect((await runs(t, sourceId))[0]).toMatchObject({ outcome: "lost", costUsd: 0.01 });
+  });
+
+  test("outlast a deleted source, including one that's still transcribing", async () => {
+    const { t, alice, projectId } = await fixture();
+    const finished = await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    await finish(t, (await claim(t))!, 0.02);
+    const running = await addSource(t, projectId, "B.pdf", undefined, ALICE);
+    await claim(t);
+
+    await alice.mutation(api.sources.remove, { sourceId: finished });
+    await alice.mutation(api.sources.remove, { sourceId: running });
+    expect((await runs(t, finished))[0]).toMatchObject({ outcome: "ready", costUsd: 0.02 });
+    expect((await runs(t, running))[0]).toMatchObject({ outcome: "lost" });
+    expect(await alice.query(api.sources.list, { projectId })).toEqual([]);
+  });
+
+  test("records an invalid result as failed, keeping its cost", async () => {
+    const { t, projectId } = await fixture();
+    const sourceId = await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    const job = (await claim(t))!;
+    const markdownId = await store(t, "Not uploaded by this claim");
+    await call(t, "/runner/complete", { ...job, markdownId, assets: [], costUsd: 0.02 });
+    expect((await source(t, sourceId))?.status).toBe("failed");
+    expect((await runs(t, sourceId))[0]).toMatchObject({ outcome: "failed", costUsd: 0.02 });
+  });
+
+  test("a Markdown file has none, and other users can't read them", async () => {
+    const { t, alice, projectId } = await fixture();
+    const note = await addSource(t, projectId, "Notes.md", "# Notes");
+    expect(await claim(t)).toBeNull();
+    const [listed] = await alice.query(api.sources.list, { projectId });
+    expect(listed).toMatchObject({ _id: note, runStats: null });
+
+    const bob = t.withIdentity({ subject: "bob", issuer: "https://clerk.test" });
+    await expect(bob.query(api.sources.list, { projectId })).rejects.toThrow();
+  });
+});
+
 describe("transcription usage", () => {
   const ALICE = "https://clerk.test|alice";
   const BOB = "https://clerk.test|bob";
@@ -714,8 +895,7 @@ describe("transcription usage", () => {
     await prepare(alice, projectId);
     const sourceId = await addSource(t, projectId, "A.pdf", undefined, ALICE);
     const queued = await addSource(t, projectId, "B.pdf", undefined, ALICE);
-    const job = (await claim(t)) as { sourceId: Id<"sources">; token: string; chargeTo: string };
-    expect(job.chargeTo).toBe(ALICE);
+    const job = (await claim(t))!;
     await alice.mutation(api.sources.remove, { sourceId });
     const late = await call(t, "/runner/fail", {
       sourceId,
@@ -726,19 +906,32 @@ describe("transcription usage", () => {
     expect(late.status).toBe(409);
     expect((await usage(t))?.usageUsd).toBe(0);
 
-    await call(t, "/runner/charge", { userId: job.chargeTo, costUsd: 0.5 });
+    await call(t, "/runner/charge", { ...job, costUsd: 0.5 });
     expect((await usage(t))?.usageUsd).toBe(0.5);
     expect(await source(t, queued)).toMatchObject({ status: "failed", error: OVER_LIMIT });
 
+    // Reporting it again, or a claim that never was, counts for nothing.
+    await call(t, "/runner/charge", { ...job, costUsd: 0.5 });
+    await call(t, "/runner/charge", { sourceId, token: "someone-else", costUsd: 1 });
+    expect((await usage(t))?.usageUsd).toBe(0.5);
+
     expect((await call(t, "/runner/charge", { costUsd: 1 })).status).toBe(400);
-    const unsigned = await call(
-      t,
-      "/runner/charge",
-      { userId: ALICE, costUsd: 1 },
-      { headers: {} },
-    );
+    const unsigned = await call(t, "/runner/charge", { ...job, costUsd: 1 }, { headers: {} });
     expect(unsigned.status).toBe(401);
     expect((await usage(t))?.usageUsd).toBe(0.5);
+  });
+
+  test("a finished job isn't charged again, even if its response was lost", async () => {
+    const { t, alice, projectId } = await fixture();
+    await prepare(alice, projectId);
+    await addSource(t, projectId, "A.pdf", undefined, ALICE);
+    const job = (await claim(t))!;
+    await finish(t, job, 0.1);
+    // The runner couldn't tell it had worked, so it fails the job, which it's told is lost.
+    const late = await call(t, "/runner/fail", { ...job, error: "", costUsd: 0.1 });
+    expect(late.status).toBe(409);
+    await call(t, "/runner/charge", { ...job, costUsd: 0.1 });
+    expect((await usage(t))?.usageUsd).toBe(0.1);
   });
 
   test("cancels a long queue in batches, so a job's charge always goes through", async () => {

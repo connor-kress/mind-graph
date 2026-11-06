@@ -31,6 +31,33 @@ async function requireSource(ctx: QueryCtx, sourceId: Id<"sources">) {
   return source;
 }
 
+/**
+ * What transcribing a source has cost and how long it took: its latest run to
+ * report, and all of them together. Null if there's nothing to show yet.
+ */
+async function runStats(ctx: QueryCtx, sourceId: Id<"sources">) {
+  const runs = await ctx.db
+    .query("transcriptionRuns")
+    .withIndex("by_claim", (q) => q.eq("sourceId", sourceId))
+    .collect();
+  // A run that crashed never said what it cost, or how long it really took.
+  const reported = runs.flatMap(({ startedAt, endedAt, costUsd }) =>
+    endedAt === undefined || costUsd === undefined
+      ? []
+      : [{ startedAt, costUsd, durationMs: endedAt - startedAt }],
+  );
+  if (!reported.length && runs.length < 2) return null;
+  return {
+    retries: runs.length - 1,
+    latest: reported.reduce<(typeof reported)[number] | null>(
+      (latest, run) => (latest && latest.startedAt > run.startedAt ? latest : run),
+      null,
+    ),
+    totalCostUsd: reported.reduce((total, run) => total + run.costUsd, 0),
+    totalDurationMs: reported.reduce((total, run) => total + run.durationMs, 0),
+  };
+}
+
 /** A project's sources, oldest first. */
 export const list = query({
   args: { projectId: v.id("projects") },
@@ -40,14 +67,17 @@ export const list = query({
       .query("sources")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect();
-    return docs.map(({ _id, name, title, kind, size, status }) => ({
-      _id,
-      name,
-      title,
-      kind,
-      size,
-      status,
-    }));
+    return Promise.all(
+      docs.map(async ({ _id, name, title, kind, size, status }) => ({
+        _id,
+        name,
+        title,
+        kind,
+        size,
+        status,
+        runStats: await runStats(ctx, _id),
+      })),
+    );
   },
 });
 

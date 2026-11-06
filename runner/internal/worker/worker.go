@@ -201,14 +201,15 @@ func (w *Worker) process(ctx context.Context, job *convex.Job) {
 		log.Error("transcription failed", append(attrs, "error", err)...)
 		err = w.Convex.Fail(finish, job, "Couldn't transcribe this file. Try again.", false, spent.USD())
 	}
-	if err != nil && !errors.Is(err, convex.ErrLost) {
+	if errors.Is(err, convex.ErrLost) {
+		w.chargeLost(finish, job, spent.USD())
+	} else if err != nil {
 		log.Error("couldn't report the failure; the claim will run out instead", "error", err)
 	}
 }
 
-// chargeLost counts what a job cost whose claim was lost, so it can't be avoided
-// by deleting the source. It's only for a claim known to have been lost before
-// it finished: if completing it seemed to fail, it may have counted already.
+// chargeLost reports what a job cost whose claim was lost, so it can't be avoided
+// by deleting the source.
 func (w *Worker) chargeLost(ctx context.Context, job *convex.Job, costUSD float64) {
 	if err := w.Convex.Charge(ctx, job, costUSD); err != nil {
 		slog.Warn("couldn't count what a lost job cost", "source", job.SourceID, "cost_usd", costUSD, "error", err)
@@ -219,7 +220,10 @@ func (w *Worker) chargeLost(ctx context.Context, job *convex.Job, costUSD float6
 func (w *Worker) release(ctx context.Context, job *convex.Job, costUSD float64) {
 	finish, done := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer done()
-	if err := w.Convex.Fail(finish, job, "", true, costUSD); err != nil && !errors.Is(err, convex.ErrLost) {
+	err := w.Convex.Fail(finish, job, "", true, costUSD)
+	if errors.Is(err, convex.ErrLost) {
+		w.chargeLost(finish, job, costUSD)
+	} else if err != nil {
 		slog.Warn("couldn't give the job back; its claim will run out instead", "source", job.SourceID, "error", err)
 	}
 }

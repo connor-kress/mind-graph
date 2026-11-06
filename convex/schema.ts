@@ -101,6 +101,23 @@ export default defineSchema({
     lastResetAt: v.number(),
   }).index("by_user", ["userId"]),
 
+  // One claim on a source by the document runner. They outlast the source, so
+  // what a file cost stays on record after it's deleted.
+  transcriptionRuns: defineTable({
+    sourceId: v.id("sources"),
+    /** The claim's token. */
+    token: v.string(),
+    /** Who the run's cost counts against. Older sources don't say. */
+    userId: v.optional(v.string()),
+    startedAt: v.number(),
+    /** When the runner reported how it ended, with what it cost. A crash never reports. */
+    endedAt: v.optional(v.number()),
+    costUsd: v.optional(v.number()),
+    outcome: v.optional(
+      v.union(v.literal("ready"), v.literal("failed"), v.literal("released"), v.literal("lost")),
+    ),
+  }).index("by_claim", ["sourceId", "token"]),
+
   // A file the document runner uploaded for a claim's result, until the claim ends.
   runnerUploads: defineTable({
     sourceId: v.id("sources"),

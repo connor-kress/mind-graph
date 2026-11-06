@@ -30,8 +30,6 @@ type Job struct {
 	Size     int64  `json:"size"`
 	FileURL  string `json:"fileUrl"`
 	LeaseMS  int64  `json:"leaseMs"`
-	// Who the job's cost counts against, if anyone.
-	ChargeTo string `json:"chargeTo"`
 	// When the claim was asked for. Its lease started no earlier.
 	Asked time.Time `json:"-"`
 }
@@ -182,15 +180,13 @@ func (c *Client) Fail(ctx context.Context, job *Job, message string, release boo
 	return c.call(ctx, "/runner/fail", in, nil)
 }
 
-// Charge counts what a job cost whose claim was lost, so that Complete and Fail can't report it.
+// Charge reports what a job cost whose claim was lost, so that Complete and Fail
+// were refused. Convex only counts a claim's first report, so it's always safe to send.
 func (c *Client) Charge(ctx context.Context, job *Job, costUSD float64) error {
-	if job.ChargeTo == "" || costUSD == 0 {
-		return nil
-	}
 	in := struct {
-		UserID  string  `json:"userId"`
+		lease
 		CostUSD float64 `json:"costUsd"`
-	}{job.ChargeTo, costUSD}
+	}{job.lease(), costUSD}
 	return c.call(ctx, "/runner/charge", in, nil)
 }
 

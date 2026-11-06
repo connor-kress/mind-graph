@@ -203,6 +203,7 @@ describe("source notes", () => {
         kind: "md",
         size: 7,
         status: "ready",
+        runStats: null,
       },
     ]);
     const source = await alice.query(api.sources.open, { sourceId });

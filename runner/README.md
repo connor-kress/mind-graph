@@ -11,9 +11,11 @@ The runner asks the Convex deployment for work over signed HTTP endpoints (`conv
 - **upload** stores one file of the result, which only that claim can use;
 - **complete** saves the Markdown and its images, replacing any earlier ones, and deletes any uploads it didn't use;
 - **fail** gives a reason the user sees, or releases the source back to the queue, e.g. on shutdown;
-- **charge** counts what a job cost if its claim was lost, e.g. because its source was deleted.
+- **charge** reports what a job cost if its claim was lost, e.g. because its source was deleted.
 
-Complete and fail also report what the job cost, which counts against the limit of whoever queued the file (`convex/usage.ts`). By default that's $0.50 per 7 days, starting with their first request after the last period ended. A user at their limit can't queue more files for transcription, and any still queued are cancelled, while those already running finish. Cost is only counted when the runner can report it, so a crash loses what that job had spent. To change one user's limit or period, edit their row in the `transcriptionUsage` table.
+Each claim is recorded in the `transcriptionRuns` table, with when it started and, once reported, when it ended and what it cost. Runs stay after their source is deleted.
+
+Complete and fail also report what the job cost, which counts against the limit of whoever queued the file (`convex/usage.ts`). Only a claim's first report counts. By default that's $0.50 per 7 days, starting with their first request after the last period ended. A user at their limit can't queue more files for transcription, and any still queued are cancelled, while those already running finish. Cost is only counted when the runner can report it, so a crash loses what that job had spent. To change one user's limit or period, edit their row in the `transcriptionUsage` table.
 
 If the heartbeats stop, Convex puts the source back in the queue when the lease runs out, deleting what the claim uploaded, and fails it after three tries. The runner stops working on a source if it can't renew the lease in time. Each request is signed with HMAC-SHA256 over its time, method, path with query, and body, using a secret shared with the deployment's `RUNNER_SECRET`. Each deployment has its own secret.
 

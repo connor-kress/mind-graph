@@ -222,17 +222,11 @@ export const failEndpoint = jsonEndpoint(async (ctx, body) => {
 });
 
 /**
- * Counts what a job cost whose claim was lost, so has no source to charge, e.g.
- * because it was deleted while it was being transcribed.
+ * Counts what a job cost whose claim was lost, e.g. because its source was
+ * deleted while it was being transcribed, so complete and fail refused it.
  */
 export const chargeEndpoint = jsonEndpoint(async (ctx, body) => {
-  if (typeof body.userId !== "string" || !body.userId) {
-    return { status: 400, body: { error: "Expected a user" } };
-  }
-  await ctx.runMutation(internal.runner.chargeUser, {
-    userId: body.userId,
-    costUsd: costOf(body),
-  });
+  await ctx.runMutation(internal.runner.chargeLost, { ...lease(body), costUsd: costOf(body) });
   return { body: {} };
 });
 
@@ -299,6 +293,7 @@ async function endClaim(
 /** Puts a source whose claim ran out back in the queue, or fails it after too many tries. */
 async function requeue(ctx: MutationCtx, source: Doc<"sources">) {
   if (source.lease) await endClaim(ctx, source._id, source.lease.token);
+  await loseRun(ctx, source);
   if ((source.attempts ?? 0) >= MAX_ATTEMPTS) {
     await ctx.db.patch(source._id, {
       status: "failed",
@@ -312,18 +307,45 @@ async function requeue(ctx: MutationCtx, source: Doc<"sources">) {
   }
 }
 
-/**
- * Counts what a job cost against whoever queued it. Once that puts them over
- * their limit, their queued files are cancelled; any others running carry on.
- */
-async function charge(ctx: MutationCtx, queuedBy: string | undefined, costUsd: number) {
-  if (queuedBy === undefined || costUsd === 0) return;
-  if (isOverLimit(await addUsage(ctx, queuedBy, costUsd))) await cancelQueued(ctx, queuedBy);
+function findRun(ctx: QueryCtx, sourceId: Id<"sources">, token: string) {
+  return ctx.db
+    .query("transcriptionRuns")
+    .withIndex("by_claim", (q) => q.eq("sourceId", sourceId).eq("token", token))
+    .unique();
 }
 
-export const chargeUser = internalMutation({
-  args: { userId: v.string(), costUsd: v.number() },
-  handler: (ctx, { userId, costUsd }) => charge(ctx, userId, costUsd),
+/**
+ * Records how a run ended and what it cost, counting that against whoever
+ * queued it. Once that puts them over their limit, their queued files are
+ * cancelled; any others running carry on. Only a run's first report counts, so
+ * the runner can report again when it can't tell whether one arrived.
+ */
+async function finishRun(
+  ctx: MutationCtx,
+  sourceId: Id<"sources">,
+  token: string,
+  outcome: "ready" | "failed" | "released" | "lost",
+  costUsd: number,
+) {
+  const run = await findRun(ctx, sourceId, token);
+  if (!run || run.costUsd !== undefined) return;
+  await ctx.db.patch(run._id, { outcome: run.outcome ?? outcome, endedAt: Date.now(), costUsd });
+  if (run.userId !== undefined && costUsd > 0) {
+    const usage = await addUsage(ctx, run.userId, costUsd);
+    if (isOverLimit(usage)) await cancelQueued(ctx, run.userId);
+  }
+}
+
+/** Marks a source's current run as lost. Its runner may still report what it cost. */
+async function loseRun(ctx: MutationCtx, source: Doc<"sources">) {
+  if (!source.lease) return;
+  const run = await findRun(ctx, source._id, source.lease.token);
+  if (run && !run.outcome) await ctx.db.patch(run._id, { outcome: "lost" });
+}
+
+export const chargeLost = internalMutation({
+  args: { sourceId: v.id("sources"), token: v.string(), costUsd: v.number() },
+  handler: (ctx, { sourceId, token, costUsd }) => finishRun(ctx, sourceId, token, "lost", costUsd),
 });
 
 /** Cancels a batch of a user's queued files. Each claim cancels more, if there are any left. */
@@ -394,6 +416,12 @@ export const claim = internalMutation({
       lease: { token, expiresAt },
       attempts: (source.attempts ?? 0) + 1,
     });
+    await ctx.db.insert("transcriptionRuns", {
+      sourceId: source._id,
+      token,
+      userId: source.queuedBy,
+      startedAt: now,
+    });
     await ctx.scheduler.runAt(expiresAt, internal.runner.checkLease, {
       sourceId: source._id,
       token,
@@ -406,7 +434,6 @@ export const claim = internalMutation({
       size: source.size,
       fileUrl: await ctx.storage.getUrl(source.storageId),
       leaseMs: LEASE_MS,
-      chargeTo: source.queuedBy,
     };
   },
 });
@@ -458,7 +485,6 @@ export const complete = internalMutation({
     const source = await leased(ctx, sourceId, token);
     // Deleted, timed out or already finished: its files went with the claim.
     if (!source) return false;
-    await charge(ctx, source.queuedBy, costUsd);
 
     const uploads = await ctx.db
       .query("runnerUploads")
@@ -481,6 +507,7 @@ export const complete = internalMutation({
         if (!IMAGE_TYPES.includes((await typeOf(asset.storageId)) ?? "")) valid = false;
       }
     }
+    await finishRun(ctx, sourceId, token, valid ? "ready" : "failed", costUsd);
     if (!valid) {
       // A bug in the runner, so trying again wouldn't help.
       console.error("Invalid transcription", sourceId);
@@ -531,7 +558,7 @@ export const fail = internalMutation({
   handler: async (ctx, { sourceId, token, error, release, costUsd }) => {
     const source = await leased(ctx, sourceId, token);
     if (!source) return false;
-    await charge(ctx, source.queuedBy, costUsd);
+    await finishRun(ctx, sourceId, token, release ? "released" : "failed", costUsd);
     await endClaim(ctx, sourceId, token);
     if (release) {
       // Not the file's fault, so the claim doesn't count.
@@ -570,6 +597,7 @@ export async function deleteTranscription(ctx: MutationCtx, source: Doc<"sources
 
 /** Deletes everything transcription made for a source that's being deleted. */
 export async function deleteSourceFiles(ctx: MutationCtx, source: Doc<"sources">) {
+  await loseRun(ctx, source);
   await deleteTranscription(ctx, source);
   await endClaim(ctx, source._id, undefined);
 }
