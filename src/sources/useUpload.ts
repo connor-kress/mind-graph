@@ -3,7 +3,8 @@ import { ConvexError } from "convex/values";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { fileProblem } from "../../convex/model";
+import { fileProblem, kindOfFile } from "../../convex/model";
+import { pdfProblem } from "./pdfProblem";
 
 /**
  * A file being uploaded, shown in the list until its source is. `sourceId` is
@@ -53,6 +54,12 @@ export function useUpload(
     setPending((uploads) => [...uploads, { id, name: file.name, projectId }]);
     const done = () => forget([id]);
     try {
+      const tooLarge = kindOfFile(file.name) === "pdf" ? await pdfProblem(file) : null;
+      if (tooLarge) {
+        done();
+        onError(projectId, tooLarge);
+        return;
+      }
       const url = await prepareUpload({ projectId, name: file.name, size: file.size });
       const response = await fetch(url, {
         method: "POST",

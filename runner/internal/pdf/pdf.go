@@ -22,6 +22,8 @@ import (
 // MuPDF, gets an adapter, so they can be compared on the same documents.
 type Tool interface {
 	PageCount(ctx context.Context, pdf string) (int, error)
+	// LargestImage returns the pixels in the document's largest bitmap, without decoding any.
+	LargestImage(ctx context.Context, pdf string) (int, error)
 	// Split writes pages first to last, counting from 1, to a new PDF.
 	Split(ctx context.Context, pdf string, first, last int, out string) error
 	// Render writes a page as a PNG, scaled so its longer side is size pixels.
@@ -32,8 +34,9 @@ type Tool interface {
 	Images(ctx context.Context, pdf string, first, last int, dir string) ([]PlacedImage, error)
 }
 
-// Limits on the bitmaps in a range for them to be extracted, so extraction
-// takes bounded memory and disk, and the model a bounded request.
+// Limits on bitmaps. A document with one past MaxImagePixels isn't transcribed.
+// The rest are for the bitmaps in a range to be extracted, so extraction takes
+// bounded memory and disk, and the model a bounded request.
 const (
 	MaxImagePixels = 40_000_000
 	maxRangeImages = 300
@@ -90,6 +93,18 @@ func (poppler) PageCount(ctx context.Context, pdf string) (int, error) {
 		return 0, fmt.Errorf("pdfinfo: no page count")
 	}
 	return strconv.Atoi(string(m[1]))
+}
+
+func (poppler) LargestImage(ctx context.Context, pdf string) (int, error) {
+	list, err := run(ctx, "pdfimages", "-list", pdf)
+	if err != nil {
+		return 0, err
+	}
+	largest := 0
+	for _, pixels := range bitmaps(list) {
+		largest = max(largest, pixels)
+	}
+	return largest, nil
 }
 
 func (p poppler) Split(ctx context.Context, pdf string, first, last int, out string) error {
@@ -163,6 +178,18 @@ func (poppler) Images(ctx context.Context, pdf string, first, last int, dir stri
 // hugeImage reports whether `pdfimages -list` shows bitmaps past the limits.
 func hugeImage(list []byte) bool {
 	count, total := 0, 0
+	for _, pixels := range bitmaps(list) {
+		count, total = count+1, total+pixels
+		if pixels > MaxImagePixels || count > maxRangeImages || total > maxRangePixels {
+			return true
+		}
+	}
+	return false
+}
+
+// bitmaps returns the pixels in each bitmap that `pdfimages -list` shows.
+func bitmaps(list []byte) []int {
+	var out []int
 	for _, line := range strings.Split(string(list), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 5 {
@@ -170,15 +197,11 @@ func hugeImage(list []byte) bool {
 		}
 		w, errW := strconv.Atoi(fields[3])
 		h, errH := strconv.Atoi(fields[4])
-		if errW != nil || errH != nil {
-			continue
-		}
-		count, total = count+1, total+w*h
-		if w*h > MaxImagePixels || count > maxRangeImages || total > maxRangePixels {
-			return true
+		if errW == nil && errH == nil {
+			out = append(out, w*h)
 		}
 	}
-	return false
+	return out
 }
 
 func parsePdftohtml(r io.Reader, dir string) ([]PlacedImage, error) {

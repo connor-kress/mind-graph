@@ -37,9 +37,15 @@ type fakePDF struct {
 	images func(dir string) ([]pdf.PlacedImage, error)
 	// A page that can't be rendered, if set.
 	broken int
+	// The pixels in the largest bitmap.
+	largest int
 }
 
 func (f fakePDF) PageCount(context.Context, string) (int, error) { return f.pages, nil }
+func (f fakePDF) LargestImage(context.Context, string) (int, error) {
+	return f.largest, nil
+}
+func (regionRecorder) LargestImage(context.Context, string) (int, error) { return 0, nil }
 func (fakePDF) Split(_ context.Context, _ string, first, last int, out string) error {
 	return os.WriteFile(out, fmt.Appendf(nil, "%d-%d", first, last), 0o600)
 }
@@ -238,7 +244,7 @@ func TestShrinkAsset(t *testing.T) {
 	path := filepath.Join(dir, "big.png")
 	os.WriteFile(path, data, 0o600)
 	a := &Asset{ID: "img1", Path: path, ContentType: "image/png"}
-	if err := shrinkAsset(a, dir); err != nil {
+	if err := shrinkAsset(context.Background(), a, dir); err != nil {
 		t.Fatal(err)
 	}
 	info, _ := os.Stat(a.Path)
@@ -584,7 +590,7 @@ func TestContactSheetsOfOriginals(t *testing.T) {
 		os.WriteFile(path, data, 0o600)
 		r.assets[id] = &Asset{ID: id, seq: int64(i), Path: path}
 	}
-	parts, _ := json.Marshal(r.assetSheets())
+	parts, _ := json.Marshal(r.assetSheets(context.Background()))
 	sheets := fakeRequest{}.images(t, parts)
 	if len(sheets) != 2 {
 		t.Fatalf("%d sheets", len(sheets))
@@ -884,5 +890,74 @@ func TestFailuresPreparingImagesArentFatal(t *testing.T) {
 				t.Errorf("assets = %v, want %d", result.Assets, want)
 			}
 		})
+	}
+}
+
+func TestAPDFWithAnImageTooLargeIsRefusedBeforeAnythingIsSpent(t *testing.T) {
+	ai := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("the model shouldn't be asked")
+	}))
+	defer ai.Close()
+	tr := &PDF{Config: config.Config{MaxPages: 75, RangePages: 25, Turns: 3, Parallel: 1},
+		AI:   &openrouter.Client{URL: ai.URL, HTTP: http.DefaultClient},
+		Tool: fakePDF{pages: 1, largest: pdf.MaxImagePixels + 1}}
+	_, err := tr.Transcribe(context.Background(), "a.pdf", []byte("%PDF"), t.TempDir())
+	var user UserError
+	if !errors.As(err, &user) || !strings.Contains(err.Error(), "41 megapixels") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestLargeImagesAreDecodedOneAtATime(t *testing.T) {
+	write := func(side int) string {
+		data, err := encodePNG(image.NewGray(image.Rect(0, 0, side, side)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(t.TempDir(), "image.png")
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	large, small := write(3000), write(100)
+	ctx := context.Background()
+
+	var at, most atomic.Int64
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			err := withImageFile(ctx, large, func(img image.Image) error {
+				n := at.Add(1)
+				for m := most.Load(); n > m && !most.CompareAndSwap(m, n); m = most.Load() {
+				}
+				time.Sleep(10 * time.Millisecond)
+				at.Add(-1)
+				return nil
+			})
+			if err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	if most.Load() != 1 {
+		t.Errorf("%d large images at once", most.Load())
+	}
+
+	// With another large image held, a small one doesn't wait, and a cancelled job stops waiting.
+	largeImages <- struct{}{}
+	defer func() { <-largeImages }()
+	if err := withImageFile(ctx, small, func(image.Image) error { return nil }); err != nil {
+		t.Error(err)
+	}
+	cancelled, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	err := withImageFile(cancelled, large, func(image.Image) error {
+		t.Error("a cancelled job shouldn't use the image")
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v", err)
 	}
 }

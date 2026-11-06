@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -39,6 +40,13 @@ func (t *PDF) Transcribe(ctx context.Context, _ string, data []byte, dir string)
 	}
 	if pages > t.Config.MaxPages {
 		return nil, UserError(fmt.Sprintf("This PDF has %d pages. PDFs of up to %d pages can be transcribed.", pages, t.Config.MaxPages))
+	}
+	// Before anything is spent or decoded. If it can't tell, the file gets the benefit of the doubt.
+	if largest, err := t.Tool.LargestImage(ctx, path); err != nil {
+		slog.Warn("couldn't check the images", "error", err)
+	} else if largest > pdf.MaxImagePixels {
+		return nil, UserError(fmt.Sprintf("This PDF has an image of %d megapixels. PDFs with images of up to %d megapixels can be transcribed. Export it at a lower resolution and upload it again.",
+			(largest+999_999)/1_000_000, pdf.MaxImagePixels/1_000_000))
 	}
 
 	type part struct {
@@ -76,7 +84,10 @@ func (t *PDF) Transcribe(ctx context.Context, _ string, data []byte, dir string)
 	}
 	// One image too large to upload loses only that image, not the note.
 	for _, id := range used {
-		if err := shrinkAsset(assets[id], dir); err != nil {
+		if err := shrinkAsset(ctx, assets[id], dir); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			slog.Warn("dropping an image too large to upload", "asset", id, "error", err)
 			delete(assets, id)
 		}
@@ -120,28 +131,26 @@ const (
 )
 
 // shrinkAsset re-encodes an image too large to upload as a smaller JPEG.
-func shrinkAsset(a *Asset, dir string) error {
+func shrinkAsset(ctx context.Context, a *Asset, dir string) error {
 	info, err := os.Stat(a.Path)
 	if err != nil || info.Size() <= maxAssetBytes {
 		return err
 	}
-	img, err := decodeImageFile(a.Path)
-	if err != nil {
-		return err
-	}
-	for _, side := range []int{4096, 2048} {
-		data, err := encodeJPEG(fit(img, side, side))
-		if err != nil {
-			return err
-		}
-		if len(data) <= maxAssetBytes {
-			path := filepath.Join(dir, a.ID+"-small.jpg")
-			if err := os.WriteFile(path, data, 0o600); err != nil {
+	return withImageFile(ctx, a.Path, func(img image.Image) error {
+		for _, side := range []int{4096, 2048} {
+			data, err := encodeJPEG(fit(img, side, side))
+			if err != nil {
 				return err
 			}
-			a.Path, a.ContentType = path, "image/jpeg"
-			return nil
+			if len(data) <= maxAssetBytes {
+				path := filepath.Join(dir, a.ID+"-small.jpg")
+				if err := os.WriteFile(path, data, 0o600); err != nil {
+					return err
+				}
+				a.Path, a.ContentType = path, "image/jpeg"
+				return nil
+			}
 		}
-	}
-	return fmt.Errorf("still over %d bytes", maxAssetBytes)
+		return fmt.Errorf("still over %d bytes", maxAssetBytes)
+	})
 }
