@@ -41,9 +41,10 @@ type Props = {
   activeTopicId?: Id<"topics">;
   onOpenMap: (id: Id<"topics">) => void;
   onDelete: (target: LibraryTarget, confirmation: string) => Promise<void>;
+  onError: (message: string) => void;
 };
 
-export function Sidebar({ library, activeTopicId, onOpenMap, onDelete }: Props) {
+export function Sidebar({ library, activeTopicId, onOpenMap, onDelete, onError }: Props) {
   const { collapsed, setOpen } = useCollapsedProjects();
   const { setOpenMobile } = useSidebar();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -159,6 +160,7 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onDelete }: Props) 
                 onDropMapFile={(id, file) => void importMapFile(id, file)}
                 onRename={startRename}
                 onDelete={setDeleting}
+                onError={onError}
               />
             ) : (
               <>

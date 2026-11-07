@@ -30,7 +30,7 @@ Markdown and text notes are ready as soon as they're uploaded. PDF, Word and Pow
 
 The notes panel opens notes in tabs, which each member gets back per map. A new tab lists the project's files, and picking one turns the tab into that note. A note can be downloaded as Markdown, zipped with its images if it has any, and the original file can be downloaded or opened in a new tab.
 
-The sidebar supports map search with `Ctrl`/`Cmd` + `K` and collapses with `Ctrl`/`Cmd` + `\`. Project and map actions are available from their menus or a right-click.
+The sidebar supports map search with `Ctrl`/`Cmd` + `K` and collapses with `Ctrl`/`Cmd` + `\`. Project and map actions are available from their menus or a right-click. Maps can be dragged to arrange them within their project, for everyone in it, or moved with `Shift` + `Up`/`Down`.
 
 Existing account-owned folders migrate to projects on sign-in, preserving map URLs and recall history. The internal `workspace:migrateProjects` backfill accepts `phase: "folders"` or `phase: "topics"` and an optional `cursor`; finish the folders phase before running topics, passing each returned cursor until `isDone`. Legacy tables remain for migration compatibility, and pre-account data stays unclaimed.
 

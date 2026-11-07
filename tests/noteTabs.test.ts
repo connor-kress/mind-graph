@@ -4,14 +4,8 @@ import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { MAX_NOTE_TABS } from "../convex/model";
 import schema from "../convex/schema";
-import {
-  addFilesTab,
-  closeTab,
-  moveTab,
-  openNote,
-  showFiles,
-  slotAt,
-} from "../src/sources/tabView";
+import { slotAt } from "../src/hooks/use-drag-sort";
+import { addFilesTab, closeTab, moveTab, openNote, showFiles } from "../src/sources/tabView";
 
 const modules = import.meta.glob("../convex/**/*.ts");
 

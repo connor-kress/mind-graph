@@ -6,13 +6,13 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { MAX_NOTE_TABS } from "../../convex/model";
 import { Button } from "../components/ui/button";
 import { Skeleton } from "../components/ui/skeleton";
+import { NO_DRAG, useDragSort } from "../hooks/use-drag-sort";
 import { cn } from "../lib/utils";
 import { NotesBar, NotesMenu } from "./NotesMenu";
 import { SourceList } from "./SourceList";
 import { SourceReader } from "./SourceReader";
 import { addFilesTab, closeTab, moveTab, openNote, type TabView } from "./tabView";
 import { TranscriptionUsage } from "./TranscriptionUsage";
-import { useTabDrag } from "./useTabDrag";
 import { useTextSize } from "./useTextSize";
 import type { PendingUpload } from "./useUpload";
 
@@ -127,9 +127,12 @@ export function NoteTabs({
   const rowContents = `${tabs.map((tab) => tab.id + (tab.sourceId ?? "")).join()} ${sources?.map((source) => source.title).join()}`;
   const { row, canScroll, scroll } = useScrollableRow(rowContents);
   // Directly, so that where a tab is dropped stays in view rather than the active tab.
-  const { drag, handlers, shiftOf, endedDrag } = useTabDrag(row, rowContents, (id, to) =>
-    onChange(moveTab(view, id, to)),
-  );
+  const { drag, handlers, styleOf, endedDrag } = useDragSort({
+    axis: "x",
+    list: row,
+    contents: rowContents,
+    onMove: (id, to) => onChange(moveTab(view, id, to)),
+  });
   // Not on every change of the view, which would undo scrolling to look at other tabs.
   useEffect(() => {
     document.getElementById(tabElementId(activeId))?.parentElement?.scrollIntoView(REVEAL_TAB);
@@ -181,12 +184,11 @@ export function NoteTabs({
               const source = sources?.find(({ _id }) => _id === tab.sourceId);
               const selected = tab === active;
               const label = tab.sourceId ? (source?.title ?? "Note") : "New tab";
-              const shift = shiftOf(index);
               return (
                 <div
                   key={tab.id}
                   {...handlers(tab.id, index)}
-                  style={shift ? { transform: `translateX(${shift}px)` } : undefined}
+                  style={styleOf(index)}
                   className={cn(
                     "group/tab relative flex max-w-44 min-w-0 shrink-0 items-center border-r text-xs select-none",
                     selected
@@ -253,7 +255,7 @@ export function NoteTabs({
                       !selected &&
                         "opacity-0 group-hover/tab:opacity-100 [@media(hover:none)]:opacity-100",
                     )}
-                    onPointerDown={(e) => e.stopPropagation()}
+                    {...NO_DRAG}
                     onClick={() => change(closeTab(view, tab.id))}
                   >
                     <X className="size-3" />

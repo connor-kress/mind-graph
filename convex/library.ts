@@ -1,8 +1,8 @@
 import { ConvexError, v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { checkNodes, withNewKeys } from "./mapFile";
-import { nodeValidator } from "./model";
+import { movedBefore, nodeValidator } from "./model";
 import { deleteProjectSources } from "./sources";
 import { insertTree } from "./workspace";
 import { requireUser, requireProject, requireTopic, memberProjects } from "./auth";
@@ -10,6 +10,17 @@ import { requireUser, requireProject, requireTopic, memberProjects } from "./aut
 import { insertProject, migrateTopic } from "./projectMigration";
 
 const MAX_NAME_LENGTH = 200;
+
+/** A project's maps in the order they've been arranged, with any others after them, oldest first. */
+async function arrangedMaps(ctx: QueryCtx, project: Pick<Doc<"projects">, "_id" | "mapOrder">) {
+  const topics = await ctx.db
+    .query("topics")
+    .withIndex("by_project", (q) => q.eq("projectId", project._id))
+    .collect();
+  const places = new Map(project.mapOrder?.map((id, place) => [id, place]));
+  const placeOf = (topic: Doc<"topics">) => places.get(topic._id) ?? Infinity;
+  return topics.sort((a, b) => placeOf(a) - placeOf(b) || a._creationTime - b._creationTime);
+}
 
 /** Projects the caller belongs to, with their shared maps. */
 export const list = query({
@@ -19,10 +30,7 @@ export const list = query({
     const projects = await memberProjects(ctx, userId);
     return Promise.all(
       projects.map(async (project) => {
-        const topics = await ctx.db
-          .query("topics")
-          .withIndex("by_project", (q) => q.eq("projectId", project._id))
-          .collect();
+        const topics = await arrangedMaps(ctx, project);
         return {
           _id: project._id,
           name: project.name,
@@ -118,6 +126,21 @@ export const renameMap = mutation({
       .collect();
     const root = nodes.find((n) => n.isRoot);
     if (root && root.label === topic.title) await ctx.db.patch(root._id, { label: next });
+  },
+});
+
+/**
+ * Moves a map to just before another in its project, or to the end. Saying where relative to
+ * another map, rather than sending a new order, keeps members arranging at once from undoing
+ * each other's moves. Maps can't move between projects, which have different notes.
+ */
+export const moveMap = mutation({
+  args: { topicId: v.id("topics"), before: v.union(v.id("topics"), v.null()) },
+  handler: async (ctx, { topicId, before }) => {
+    const topic = await requireTopic(ctx, topicId);
+    const project = await ctx.db.get(topic.projectId!);
+    const maps = (await arrangedMaps(ctx, project!)).map((map) => map._id);
+    await ctx.db.patch(project!._id, { mapOrder: movedBefore(maps, topicId, before) });
   },
 });
 

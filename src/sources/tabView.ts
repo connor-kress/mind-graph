@@ -40,18 +40,3 @@ export function moveTab({ tabs, activeId }: TabView, id: string, to: number): Ta
   const place = Math.min(Math.max(to, 0), others.length);
   return { tabs: [...others.slice(0, place), tab, ...others.slice(place)], activeId };
 }
-
-/**
- * Where a tab dragged to start at a point along the row would go, given each tab's width.
- * It takes a neighbor's place once its leading edge passes the middle of that neighbor where
- * it was, which keeps tabs of different widths from swapping back and forth.
- */
-export function slotAt(widths: number[], from: number, start: number) {
-  const lefts = widths.map((_, index) => widths.slice(0, index).reduce((sum, w) => sum + w, 0));
-  const middle = (index: number) => lefts[index] + widths[index] / 2;
-  let slot = from;
-  while (slot < widths.length - 1 && start + widths[from] > middle(slot + 1)) slot++;
-  if (slot > from) return slot;
-  while (slot > 0 && start < middle(slot - 1)) slot--;
-  return slot;
-}

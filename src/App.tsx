@@ -346,6 +346,7 @@ export default function App() {
         activeTopicId={workspace?.topic._id}
         onOpenMap={openMap}
         onDelete={removeFromLibrary}
+        onError={setError}
       />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
         <TopBar
