@@ -2,7 +2,7 @@ import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { ConvexError } from "convex/values";
 import { BookOpen, MoreHorizontal, Pencil, RotateCw, Trash2 } from "lucide-react";
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { memo, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import {
@@ -95,7 +95,13 @@ function RunStats({
 }
 
 /** A project's source files, plus the ones still uploading. */
-export function SourceList({ projectId, pending, onListed, onOpen, onError }: Props) {
+export const SourceList = memo(function SourceList({
+  projectId,
+  pending,
+  onListed,
+  onOpen,
+  onError,
+}: Props) {
   const sources = useQuery(api.sources.list, projectId ? { projectId } : "skip");
   // An added upload's row stays until its source is listed, then goes for good,
   // so it can't come back if the source is deleted. Sources seen earlier count:
@@ -293,4 +299,4 @@ export function SourceList({ projectId, pending, onListed, onOpen, onError }: Pr
       )}
     </ScrollArea>
   );
-}
+});
