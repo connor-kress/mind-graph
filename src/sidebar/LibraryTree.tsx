@@ -116,12 +116,12 @@ export function LibraryTree({
                 <ContextMenu>
                   <ContextMenuTrigger asChild>
                     <CollapsibleTrigger asChild>
-                      <SidebarMenuButton className="h-9 pr-2! transition-none group-hover/project-row:pr-14! group-has-[:focus-visible]/project-row:pr-14! group-has-[[data-sidebar=menu-action][aria-expanded=true]]/project-row:pr-14! [@media(hover:none)]:pr-14!">
+                      <SidebarMenuButton className="h-9 pr-0! transition-none [--fading-title-room:3.5rem] group-hover/project-row:[--fading-title-end:3.5rem] group-has-[:focus-visible]/project-row:[--fading-title-end:3.5rem] group-has-[[data-sidebar=menu-action][aria-expanded=true]]/project-row:[--fading-title-end:3.5rem] [@media(hover:none)]:[--fading-title-end:3.5rem]">
                         <ChevronRight
                           className={`size-3.5 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
                         />
                         {open ? <ProjectOpen /> : <Project />}
-                        <span>{project.name}</span>
+                        <span className="fading-title">{project.name}</span>
                       </SidebarMenuButton>
                     </CollapsibleTrigger>
                   </ContextMenuTrigger>
@@ -226,13 +226,13 @@ export function LibraryTree({
                         <ContextMenu>
                           <ContextMenuTrigger asChild>
                             <SidebarMenuButton
-                              className="h-8 pr-2! text-[13px] transition-none group-hover/map-row:pr-8! group-has-[:focus-visible]/map-row:pr-8! group-has-[[data-sidebar=menu-action][aria-expanded=true]]/map-row:pr-8! [@media(hover:none)]:pr-8!"
+                              className="h-8 pr-0! text-[13px] transition-none [--fading-title-room:2rem] group-hover/map-row:[--fading-title-end:2rem] group-has-[:focus-visible]/map-row:[--fading-title-end:2rem] group-has-[[data-sidebar=menu-action][aria-expanded=true]]/map-row:[--fading-title-end:2rem] [@media(hover:none)]:[--fading-title-end:2rem]"
                               isActive={map._id === activeTopicId}
                               aria-current={map._id === activeTopicId ? "page" : undefined}
                               onClick={() => onOpenMap(map._id)}
                             >
                               <FileText className="text-muted-foreground" />
-                              <span>{map.title}</span>
+                              <span className="fading-title">{map.title}</span>
                             </SidebarMenuButton>
                           </ContextMenuTrigger>
                           <ContextMenuContent

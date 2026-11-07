@@ -232,10 +232,10 @@ export function NoteTabs({
                     ) : (
                       <span
                         className={cn(
-                          "note-tab-title",
+                          "fading-title [--fading-title-room:1.5rem]",
                           // Where the close button is showing, the title has to fade out before it.
-                          selected && "[--note-tab-fade-end:1.5rem]",
-                          "group-hover/tab:[--note-tab-fade-end:1.5rem] [@media(hover:none)]:[--note-tab-fade-end:1.5rem]",
+                          selected && "[--fading-title-end:1.5rem]",
+                          "group-hover/tab:[--fading-title-end:1.5rem] [@media(hover:none)]:[--fading-title-end:1.5rem]",
                         )}
                       >
                         {label}

@@ -38,8 +38,10 @@ export function AccountMenu({ compact = false }: { compact?: boolean }) {
           {!compact && (
             <>
               <span className="grid min-w-0 flex-1 gap-0.5">
-                <span className="truncate text-sm font-medium">{label}</span>
-                <span className="truncate text-xs font-normal text-muted-foreground">
+                <span className="fading-title text-sm font-medium [--fading-title-end:0px]">
+                  {label}
+                </span>
+                <span className="fading-title text-xs font-normal text-muted-foreground [--fading-title-end:0px]">
                   {name && email ? email : "Manage account"}
                 </span>
               </span>
