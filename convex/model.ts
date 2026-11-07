@@ -139,3 +139,10 @@ export function fileProblem(name: string, size: number) {
   if (name.length > MAX_SOURCE_NAME_LENGTH) return "That file name is too long";
   return null;
 }
+
+/** A list with one of its items moved to just before another, or to the end. */
+export function movedBefore<T>(items: T[], item: T, before: T | null) {
+  const others = items.filter((other) => other !== item);
+  const place = before === null ? -1 : others.indexOf(before);
+  return place < 0 ? [...others, item] : [...others.slice(0, place), item, ...others.slice(place)];
+}

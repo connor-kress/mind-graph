@@ -16,6 +16,8 @@ export default defineSchema({
     name: v.string(),
     createdBy: v.string(),
     order: v.number(),
+    /** Its maps in the order they've been arranged. Any others follow, oldest first. */
+    mapOrder: v.optional(v.array(v.id("topics"))),
     // Migration metadata; never used to grant access.
     legacyFolderId: v.optional(v.id("folders")),
     legacyOwnerId: v.optional(v.string()),
