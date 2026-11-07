@@ -15,6 +15,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { movedBefore } from "../../convex/model";
+import { MAP_EXPORTS, type MapExportFormat } from "../editor/exportImage";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import {
   ContextMenu,
@@ -59,6 +60,7 @@ type Props = {
   onDropMapFile: (id: Id<"projects">, file: File) => void;
   onRename: (target: LibraryTarget) => void;
   onDelete: (target: LibraryTarget) => void;
+  onExportMap: (map: { id: Id<"topics">; title: string }, format: MapExportFormat) => void;
   onError: (message: string) => void;
 };
 
@@ -73,6 +75,7 @@ export function LibraryTree({
   onDropMapFile,
   onRename,
   onDelete,
+  onExportMap,
   onError,
 }: Props) {
   const [dropTarget, setDropTarget] = useState<Id<"projects"> | null>(null);
@@ -230,6 +233,7 @@ export function LibraryTree({
                   onOpenMap={onOpenMap}
                   onRename={onRename}
                   onDelete={onDelete}
+                  onExportMap={onExportMap}
                   onError={onError}
                 />
               </CollapsibleContent>
@@ -243,7 +247,7 @@ export function LibraryTree({
 
 type ProjectMapsProps = Pick<
   Props,
-  "activeTopicId" | "onOpenMap" | "onRename" | "onDelete" | "onError"
+  "activeTopicId" | "onOpenMap" | "onRename" | "onDelete" | "onExportMap" | "onError"
 > & {
   maps: Library[number]["maps"];
 };
@@ -255,6 +259,7 @@ function ProjectMaps({
   onOpenMap,
   onRename,
   onDelete,
+  onExportMap,
   onError,
 }: ProjectMapsProps) {
   const moveMap = useMutation(api.library.moveMap).withOptimisticUpdate(
@@ -351,6 +356,16 @@ function ProjectMaps({
                   Rename map
                 </ContextMenuItem>
                 <ContextMenuSeparator />
+                {MAP_EXPORTS.map(({ format, label, Icon }) => (
+                  <ContextMenuItem
+                    key={format}
+                    onSelect={() => onExportMap({ id: map._id, title: map.title }, format)}
+                  >
+                    <Icon />
+                    {label}
+                  </ContextMenuItem>
+                ))}
+                <ContextMenuSeparator />
                 <ContextMenuItem
                   variant="destructive"
                   onSelect={() => onDelete({ kind: "map", id: map._id, name: map.title })}
@@ -382,6 +397,16 @@ function ProjectMaps({
                   <Pencil />
                   Rename map
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {MAP_EXPORTS.map(({ format, label, Icon }) => (
+                  <DropdownMenuItem
+                    key={format}
+                    onSelect={() => onExportMap({ id: map._id, title: map.title }, format)}
+                  >
+                    <Icon />
+                    {label}
+                  </DropdownMenuItem>
+                ))}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   variant="destructive"

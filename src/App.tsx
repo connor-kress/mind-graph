@@ -10,7 +10,14 @@ import { CompareView } from "./compare/CompareView";
 import { NotesPanel } from "./components/NotesPanel";
 import { RecallStart } from "./components/RecallStart";
 import { commitEdits } from "./editor/commitEdits";
-import { downloadMapFile, downloadMapImage, fileName } from "./editor/exportImage";
+import {
+  downloadMapFile,
+  downloadMapImage,
+  fileName,
+  saveMapImage,
+  type MapExportFormat,
+} from "./editor/exportImage";
+import { mapImage } from "./editor/mapSnapshot";
 import { TopBar } from "./components/TopBar";
 import { MapControls, type Mode } from "./components/MapControls";
 import { isTextInput } from "./editor/isTextInput";
@@ -166,6 +173,32 @@ export default function App() {
     commitEdits();
     const nodes = await convex.query(api.nodes.list, { mapId });
     downloadMapFile(name, toMapFile(title, nodes));
+  };
+
+  /** Exports a map from the library, which needn't be open, as it is in Build. */
+  const exportLibraryMap = async (
+    { id, title }: { id: Id<"topics">; title: string },
+    format: MapExportFormat,
+  ) => {
+    commitEdits();
+    const target = await convex.query(api.workspace.get, { topicId: id });
+    if (target?.topic._id !== id || !target.referenceMapId) {
+      throw new Error("This map has no reference map");
+    }
+    // It would reveal the answers, as Build would.
+    if (target.recallMapId) {
+      setError(LOCKED);
+      return;
+    }
+    const nodes = await convex.query(api.nodes.list, { mapId: target.referenceMapId });
+    const name = fileName(title);
+    if (format === "json") {
+      downloadMapFile(name, toMapFile(title, nodes));
+      return;
+    }
+    const image = await mapImage(nodes);
+    if (!image) throw new Error("There's no map to export");
+    saveMapImage(name, image);
   };
 
   const removeFromLibrary = async (target: LibraryTarget, confirmation: string) => {
@@ -346,6 +379,13 @@ export default function App() {
         activeTopicId={workspace?.topic._id}
         onOpenMap={openMap}
         onDelete={removeFromLibrary}
+        onExportMap={(map, format) => {
+          setError(null);
+          exportLibraryMap(map, format).catch((e) => {
+            console.error("Failed to export map", e);
+            setError("Couldn't export the map");
+          });
+        }}
         onError={setError}
       />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden">

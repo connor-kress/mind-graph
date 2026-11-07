@@ -1,4 +1,5 @@
-import { BookOpen, FileJson, ImageDown, Keyboard, MoreHorizontal } from "lucide-react";
+import { BookOpen, Keyboard, MoreHorizontal } from "lucide-react";
+import { MAP_EXPORTS, type MapExportFormat } from "../editor/exportImage";
 import { AccountMenu } from "./AccountMenu";
 import {
   Breadcrumb,
@@ -21,11 +22,6 @@ import { Separator } from "./ui/separator";
 import { SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
-const EXPORTS = [
-  { format: "png", label: "Export as PNG", Icon: ImageDown },
-  { format: "json", label: "Export as JSON", Icon: FileJson },
-] as const;
-
 type Props = {
   project?: string | null;
   title?: string;
@@ -33,7 +29,7 @@ type Props = {
   onVimToggle: () => void;
   notesOpen: boolean;
   onNotesToggle: () => void;
-  onExport: (format: "png" | "json") => void;
+  onExport: (format: MapExportFormat) => void;
   /** Why the map can't be exported right now, if it can't. */
   exportDisabled?: string;
 };
@@ -124,7 +120,7 @@ export function TopBar({
               Source notes
             </DropdownMenuCheckboxItem>
             <DropdownMenuSeparator />
-            {EXPORTS.map(({ format, label, Icon }) => (
+            {MAP_EXPORTS.map(({ format, label, Icon }) => (
               <Tooltip key={format}>
                 <TooltipTrigger asChild>
                   <DropdownMenuItem
