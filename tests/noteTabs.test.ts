@@ -128,21 +128,13 @@ describe("saved note tabs", () => {
   });
 
   test("are refused when they don't make sense", async () => {
-    const { alice, topicId, addNote } = await fixture();
-    const sourceId = await addNote("Lecture");
+    const { alice, topicId } = await fixture();
     const refused = [
       { tabs: [], activeId: "a" },
       { tabs: [{ id: "a" }], activeId: "b" },
       { tabs: [{ id: "" }], activeId: "" },
       { tabs: [{ id: "a".repeat(65) }], activeId: "a".repeat(65) },
       { tabs: [{ id: "a" }, { id: "a" }], activeId: "a" },
-      {
-        tabs: [
-          { id: "a", sourceId },
-          { id: "b", sourceId },
-        ],
-        activeId: "a",
-      },
       {
         tabs: Array.from({ length: MAX_NOTE_TABS + 1 }, (_, i) => ({ id: String(i) })),
         activeId: "0",
@@ -153,6 +145,20 @@ describe("saved note tabs", () => {
         "Invalid note tabs",
       );
     }
+  });
+
+  test("can hold a note more than once, and lose them all with it", async () => {
+    const { alice, topicId, addNote } = await fixture();
+    const sourceId = await addNote("Lecture");
+    const tabs = [{ id: "a", sourceId }, { id: "b", sourceId }, { id: "c" }];
+    await alice.mutation(api.noteTabs.set, { topicId, tabs, activeId: "b" });
+    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual({ tabs, activeId: "b" });
+
+    await alice.mutation(api.sources.remove, { sourceId });
+    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual({
+      tabs: [{ id: "c" }],
+      activeId: "c",
+    });
   });
 
   test("are private to the project's members", async () => {
@@ -198,11 +204,11 @@ describe("changing tabs", () => {
     });
   });
 
-  test("opening a note that's already open goes to it and drops the Files tab", () => {
+  test("a note can be opened again in another tab", () => {
     const open = { id: "a", sourceId: one };
-    expect(openNote({ tabs: [open, { id: "b" }, { id: "c" }], activeId: "b" }, one)).toEqual({
-      tabs: [open, { id: "c" }],
-      activeId: "a",
+    expect(openNote({ tabs: [open, { id: "b" }], activeId: "b" }, one)).toEqual({
+      tabs: [open, { id: "b", sourceId: one }],
+      activeId: "b",
     });
   });
 

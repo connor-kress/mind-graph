@@ -53,13 +53,11 @@ export const set = mutation({
   handler: async (ctx, { topicId, tabs, activeId }) => {
     const userId = await requireUser(ctx);
     const topic = await requireTopic(ctx, topicId);
-    const notes = tabs.flatMap((tab) => tab.sourceId ?? []);
     if (
       !tabs.length ||
       tabs.length > MAX_NOTE_TABS ||
       tabs.some((tab) => !tab.id || tab.id.length > MAX_TAB_ID_LENGTH) ||
       new Set(tabs.map((tab) => tab.id)).size !== tabs.length ||
-      new Set(notes).size !== notes.length ||
       !tabs.some((tab) => tab.id === activeId)
     ) {
       throw new ConvexError("Invalid note tabs");

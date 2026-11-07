@@ -9,15 +9,8 @@ export function addFilesTab({ tabs }: Pick<TabView, "tabs">): TabView {
   return { tabs: [...tabs, tab], activeId: tab.id };
 }
 
-/**
- * Opens a note picked from the files in the active tab, which becomes that note.
- * A note already open is gone to instead, without leaving that tab behind.
- */
+/** Opens a note picked from the files in the active tab, which becomes that note. */
 export function openNote({ tabs, activeId }: TabView, sourceId: NoteTab["sourceId"]): TabView {
-  const open = tabs.find((tab) => tab.sourceId === sourceId);
-  if (open) {
-    return { tabs: tabs.filter((tab) => tab.id !== activeId || tab.sourceId), activeId: open.id };
-  }
   return { tabs: tabs.map((tab) => (tab.id === activeId ? { ...tab, sourceId } : tab)), activeId };
 }
 
