@@ -106,6 +106,12 @@ export function NoteTabs({
     focusActive.current = true;
     onChange(next);
   };
+  const close = (id: string) => {
+    const next = closeTab(view, id);
+    change(next);
+    // The last tab takes the panel with it, which has a new one when it's shown again.
+    if (!next.tabs.length) onHide();
+  };
   // Stable, so that changing tabs doesn't re-render the list of files behind them.
   const latest = useRef({ view, change });
   useLayoutEffect(() => {
@@ -169,7 +175,7 @@ export function NoteTabs({
                 Home: 0,
                 End: tabs.length - 1,
               };
-              if (e.key === "Delete") change(closeTab(view, active.id));
+              if (e.key === "Delete") close(active.id);
               else if (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
                 if (tabs[to[e.key]]) change(moveTab(view, active.id, to[e.key]));
               } else if (e.key in to) {
@@ -190,7 +196,8 @@ export function NoteTabs({
                   {...handlers(tab.id, index)}
                   style={styleOf(index)}
                   className={cn(
-                    "group/tab relative flex max-w-44 min-w-0 shrink-0 items-center border-r text-xs select-none",
+                    // Tabs narrow to fit before the row scrolls, or the row's arrows would cover a close button.
+                    "group/tab relative flex max-w-44 min-w-20 items-center border-r text-xs select-none",
                     selected
                       ? "bg-background text-foreground"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -205,7 +212,7 @@ export function NoteTabs({
                     if (e.button === 1) e.preventDefault();
                   }}
                   onAuxClick={(e) => {
-                    if (e.button === 1) change(closeTab(view, tab.id));
+                    if (e.button === 1) close(tab.id);
                   }}
                 >
                   <button
@@ -251,12 +258,13 @@ export function NoteTabs({
                     title="Close"
                     tabIndex={-1}
                     className={cn(
-                      "absolute top-1/2 right-1 size-5 -translate-y-1/2",
+                      // Easier to hit than it looks: the height of the tab, out to its edge.
+                      "absolute top-1/2 right-1 size-5 -translate-y-1/2 after:absolute after:-inset-x-1 after:-inset-y-2.5",
                       !selected &&
                         "opacity-0 group-hover/tab:opacity-100 [@media(hover:none)]:opacity-100",
                     )}
                     {...NO_DRAG}
-                    onClick={() => change(closeTab(view, tab.id))}
+                    onClick={() => close(tab.id)}
                   >
                     <X className="size-3" />
                   </Button>

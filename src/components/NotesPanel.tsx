@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { kindOfFile, losesImages, SOURCE_KINDS } from "../../convex/model";
+import { DEFAULT_NOTE_TABS, kindOfFile, losesImages, SOURCE_KINDS } from "../../convex/model";
 import { useIsMobile } from "../hooks/use-mobile";
 import { NotesBar, NotesMenu } from "../sources/NotesMenu";
 import { NoteTabs } from "../sources/NoteTabs";
@@ -74,7 +74,7 @@ export function NotesPanel({ topicId, projectId, hidden, open, onOpenChange }: P
   );
   const openTabs = useQuery(api.noteTabs.get, topicId ? { topicId } : "skip");
   const saveTabs = useMutation(api.noteTabs.set).withOptimisticUpdate((store, { topicId, tabs }) =>
-    store.setQuery(api.noteTabs.get, { topicId }, tabs),
+    store.setQuery(api.noteTabs.get, { topicId }, tabs.length ? tabs : DEFAULT_NOTE_TABS),
   );
   // Which tab is showing is kept in this browser, not with the tabs, so it follows nothing
   // elsewhere. It's read as a map opens, for other windows here to go their own way too.
