@@ -139,7 +139,7 @@ export const SourceList = memo(function SourceList({
         <BookOpen className="mx-auto mb-3 size-7 text-muted-foreground/50" />
         <p className="font-medium text-foreground">No source notes yet</p>
         <p className="mt-1 leading-6 text-muted-foreground">
-          Drag files here or choose Upload files in the menu above. Markdown, text, Word, PDF, and
+          Drag files here or choose Upload file in the menu above. Markdown, text, Word, PDF, and
           PowerPoint files up to {MAX_SOURCE_BYTES / 1024 / 1024} MB and {MAX_SOURCE_PAGES} pages.
         </p>
       </div>

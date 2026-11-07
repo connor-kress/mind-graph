@@ -4,7 +4,14 @@ import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { MAX_NOTE_TABS } from "../convex/model";
 import schema from "../convex/schema";
-import { addFilesTab, closeTab, openNote, showFiles } from "../src/sources/tabView";
+import {
+  addFilesTab,
+  closeTab,
+  moveTab,
+  openNote,
+  showFiles,
+  slotAt,
+} from "../src/sources/tabView";
 
 const modules = import.meta.glob("../convex/**/*.ts");
 
@@ -216,6 +223,66 @@ describe("changing tabs", () => {
     expect(view.tabs[0].id).not.toBe("a");
     expect(view.tabs[0].sourceId).toBeUndefined();
     expect(view.activeId).toBe(view.tabs[0].id);
+  });
+
+  describe("moving a tab", () => {
+    const tabs = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    const order = (to: number, id = "a") =>
+      moveTab({ tabs, activeId: "b" }, id, to)
+        .tabs.map((tab) => tab.id)
+        .join("");
+
+    test("puts it in its new place, keeping the active tab", () => {
+      expect(order(0)).toBe("abc");
+      expect(order(1)).toBe("bac");
+      expect(order(2)).toBe("bca");
+      expect(order(0, "c")).toBe("cab");
+      expect(moveTab({ tabs, activeId: "b" }, "a", 2).activeId).toBe("b");
+    });
+
+    test("stops at the ends of the row", () => {
+      expect(order(-1)).toBe("abc");
+      expect(order(5)).toBe("bca");
+    });
+
+    test("leaves things as they are for a tab that's gone", () => {
+      expect(moveTab({ tabs, activeId: "b" }, "x", 1)).toEqual({ tabs, activeId: "b" });
+    });
+  });
+
+  describe("where a dragged tab lands", () => {
+    // Tabs starting at 0, 100 and 150.
+    const widths = [100, 50, 100];
+
+    test("stays put until it has been moved far enough, however wide it is", () => {
+      expect(slotAt(widths, 0, 0)).toBe(0);
+      expect(slotAt(widths, 1, 100)).toBe(1);
+      expect(slotAt(widths, 2, 150)).toBe(2);
+      expect(slotAt([200, 20], 0, 0)).toBe(0);
+      expect(slotAt([20, 200], 1, 20)).toBe(1);
+    });
+
+    test("passes a neighbor once its leading edge reaches that neighbor's middle", () => {
+      // Moving right: its right edge against the middle of 125, then of 200.
+      expect(slotAt(widths, 0, 24)).toBe(0);
+      expect(slotAt(widths, 0, 26)).toBe(1);
+      expect(slotAt(widths, 0, 99)).toBe(1);
+      expect(slotAt(widths, 0, 101)).toBe(2);
+      // Moving left: its left edge against the middle of 125, then of 50.
+      expect(slotAt(widths, 2, 126)).toBe(2);
+      expect(slotAt(widths, 2, 124)).toBe(1);
+      expect(slotAt(widths, 2, 51)).toBe(1);
+      expect(slotAt(widths, 2, 49)).toBe(0);
+    });
+
+    test("goes as far as the row does", () => {
+      expect(slotAt(widths, 0, 999)).toBe(2);
+      expect(slotAt(widths, 2, -50)).toBe(0);
+    });
+
+    test("is only one tab's business", () => {
+      expect(slotAt([100], 0, 50)).toBe(0);
+    });
   });
 
   describe("showing the files", () => {
