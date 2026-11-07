@@ -1,5 +1,5 @@
 import { useQuery } from "convex/react";
-import { FolderOpen, Plus, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, FolderOpen, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -33,6 +33,40 @@ const panelElementId = (sourceId?: Id<"sources">) => `note-panel-${sourceId ?? "
 
 /** Keeps a panel's place while it's out of sight, without laying it out. */
 const OUT_OF_SIGHT = "invisible [content-visibility:hidden]";
+
+/** How much of a row's width to scroll by at a time, leaving some context in view. */
+const SCROLL_FRACTION = 0.75;
+
+/** Which way a row can scroll, kept up to date as it scrolls, resizes or `contents` change. */
+function useScrollableRow(contents: unknown) {
+  const row = useRef<HTMLDivElement>(null);
+  const [canScroll, setCanScroll] = useState({ left: false, right: false });
+  const measure = useCallback(() => {
+    if (!row.current) return;
+    const { scrollLeft, clientWidth, scrollWidth } = row.current;
+    // A fraction of a pixel short of the end is the end, with display scaling.
+    const left = scrollLeft > 1;
+    const right = scrollLeft + clientWidth < scrollWidth - 1;
+    setCanScroll((was) => (was.left === left && was.right === right ? was : { left, right }));
+  }, []);
+  useLayoutEffect(measure, [measure, contents]);
+  useEffect(() => {
+    const element = row.current;
+    if (!element) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    element.addEventListener("scroll", measure, { passive: true });
+    return () => {
+      observer.disconnect();
+      element.removeEventListener("scroll", measure);
+    };
+  }, [measure]);
+  const scroll = (direction: -1 | 1) =>
+    row.current?.scrollBy({
+      left: direction * row.current.clientWidth * SCROLL_FRACTION,
+    });
+  return { row, canScroll, scroll };
+}
 
 /** The notes panel's open tabs, and the files or note the active one shows. */
 export function NoteTabs({
@@ -70,12 +104,23 @@ export function NoteTabs({
     latest.current.change(openNote(latest.current.view, sourceId));
   }, []);
   useEffect(() => {
-    const element = document.getElementById(tabElementId(activeId));
-    // With its close button, which is beside it.
-    element?.parentElement?.scrollIntoView({ block: "nearest", inline: "nearest" });
-    if (focusActive.current) element?.focus({ preventScroll: true });
+    if (focusActive.current) {
+      document.getElementById(tabElementId(activeId))?.focus({ preventScroll: true });
+    }
     focusActive.current = false;
   }, [view, activeId]);
+
+  // Titles widen tabs, so the row depends on them as well as on which are open.
+  const { row, canScroll, scroll } = useScrollableRow(
+    `${tabs.map((tab) => tab.sourceId ?? "").join()} ${sources?.map((source) => source.title).join()}`,
+  );
+  // Not on every change of the view, which would undo scrolling to look at other tabs.
+  useEffect(() => {
+    document
+      .getElementById(tabElementId(activeId))
+      // With its close button, which is beside it.
+      ?.parentElement?.scrollIntoView({ behavior: "instant", block: "nearest", inline: "nearest" });
+  }, [activeId, active.sourceId, tabs.length]);
 
   return (
     <>
@@ -90,100 +135,134 @@ export function NoteTabs({
           />
         }
       >
-        <div
-          role="tablist"
-          aria-label="Open notes"
-          className="flex h-full min-w-0 overflow-x-auto [scrollbar-width:none]"
-          onKeyDown={(e) => {
-            const index = tabs.indexOf(active);
-            const to: Record<string, number> = {
-              ArrowRight: index + 1,
-              ArrowLeft: index - 1,
-              Home: 0,
-              End: tabs.length - 1,
-            };
-            if (e.key === "Delete") change(closeTab(view, active.id));
-            else if (e.key in to) {
-              const tab = tabs[(to[e.key] + tabs.length) % tabs.length];
-              if (tab !== active) change({ tabs, activeId: tab.id });
-            } else return;
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-        >
-          {tabs.map((tab) => {
-            const source = sources?.find(({ _id }) => _id === tab.sourceId);
-            const selected = tab === active;
-            const label = tab.sourceId ? (source?.title ?? "Note") : "Files";
-            return (
-              <div
-                key={tab.id}
-                className={cn(
-                  "group/tab relative flex max-w-44 min-w-0 shrink-0 items-center border-r text-xs",
-                  selected
-                    ? "bg-background text-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                )}
-                // Middle-click closes a tab, as in a browser, instead of starting to scroll.
-                onMouseDown={(e) => {
-                  if (e.button === 1) e.preventDefault();
-                }}
-                onAuxClick={(e) => {
-                  if (e.button === 1) change(closeTab(view, tab.id));
-                }}
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  id={tabElementId(tab.id)}
-                  aria-selected={selected}
-                  // A note's panel only exists once it has been shown.
-                  aria-controls={
-                    !tab.sourceId || shown.has(tab.sourceId)
-                      ? panelElementId(tab.sourceId)
-                      : undefined
-                  }
-                  tabIndex={selected ? 0 : -1}
-                  title={source ? `${source.title}\n${source.name}` : undefined}
-                  className="flex h-full w-full min-w-0 items-center gap-1.5 pl-2.5 outline-none focus-visible:underline focus-visible:underline-offset-4"
-                  onClick={() => {
-                    if (!selected) change({ tabs, activeId: tab.id });
+        <div className="relative flex h-full min-w-0">
+          <div
+            ref={row}
+            role="tablist"
+            aria-label="Open notes"
+            className={cn(
+              "note-tab-row flex h-full min-w-0 scroll-px-10 overflow-x-auto [scrollbar-width:none] motion-safe:scroll-smooth",
+              canScroll.left && "[--note-tab-row-left:2.5rem]",
+              canScroll.right && "[--note-tab-row-right:2.5rem]",
+            )}
+            onKeyDown={(e) => {
+              const index = tabs.indexOf(active);
+              const to: Record<string, number> = {
+                ArrowRight: index + 1,
+                ArrowLeft: index - 1,
+                Home: 0,
+                End: tabs.length - 1,
+              };
+              if (e.key === "Delete") change(closeTab(view, active.id));
+              else if (e.key in to) {
+                const tab = tabs[(to[e.key] + tabs.length) % tabs.length];
+                if (tab !== active) change({ tabs, activeId: tab.id });
+              } else return;
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+          >
+            {tabs.map((tab) => {
+              const source = sources?.find(({ _id }) => _id === tab.sourceId);
+              const selected = tab === active;
+              const label = tab.sourceId ? (source?.title ?? "Note") : "Files";
+              return (
+                <div
+                  key={tab.id}
+                  className={cn(
+                    "group/tab relative flex max-w-44 min-w-0 shrink-0 items-center border-r text-xs",
+                    selected
+                      ? "bg-background text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                  // Middle-click closes a tab, as in a browser, instead of starting to scroll.
+                  onMouseDown={(e) => {
+                    if (e.button === 1) e.preventDefault();
+                  }}
+                  onAuxClick={(e) => {
+                    if (e.button === 1) change(closeTab(view, tab.id));
                   }}
                 >
-                  {!tab.sourceId && <FolderOpen aria-hidden className="size-3.5 shrink-0" />}
-                  {tab.sourceId && !sources ? (
-                    <Skeleton className="mr-9 h-3 w-16" />
-                  ) : (
-                    <span
-                      className={cn(
-                        "note-tab-title",
-                        // Where the close button is showing, the title has to fade out before it.
-                        selected && "[--note-tab-fade-end:1.5rem]",
-                        "group-hover/tab:[--note-tab-fade-end:1.5rem] [@media(hover:none)]:[--note-tab-fade-end:1.5rem]",
-                      )}
-                    >
-                      {label}
-                    </span>
-                  )}
-                </button>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={`Close ${label}`}
-                  title="Close"
-                  tabIndex={-1}
-                  className={cn(
-                    "absolute top-1/2 right-1 size-5 -translate-y-1/2",
-                    !selected &&
-                      "opacity-0 group-hover/tab:opacity-100 [@media(hover:none)]:opacity-100",
-                  )}
-                  onClick={() => change(closeTab(view, tab.id))}
-                >
-                  <X className="size-3" />
-                </Button>
-              </div>
-            );
-          })}
+                  <button
+                    type="button"
+                    role="tab"
+                    id={tabElementId(tab.id)}
+                    aria-selected={selected}
+                    // A note's panel only exists once it has been shown.
+                    aria-controls={
+                      !tab.sourceId || shown.has(tab.sourceId)
+                        ? panelElementId(tab.sourceId)
+                        : undefined
+                    }
+                    tabIndex={selected ? 0 : -1}
+                    title={source ? `${source.title}\n${source.name}` : undefined}
+                    className="flex h-full w-full min-w-0 items-center gap-1.5 pl-2.5 outline-none focus-visible:underline focus-visible:underline-offset-4"
+                    onClick={() => {
+                      if (!selected) change({ tabs, activeId: tab.id });
+                    }}
+                  >
+                    {!tab.sourceId && <FolderOpen aria-hidden className="size-3.5 shrink-0" />}
+                    {tab.sourceId && !sources ? (
+                      <Skeleton className="mr-9 h-3 w-16" />
+                    ) : (
+                      <span
+                        className={cn(
+                          "note-tab-title",
+                          // Where the close button is showing, the title has to fade out before it.
+                          selected && "[--note-tab-fade-end:1.5rem]",
+                          "group-hover/tab:[--note-tab-fade-end:1.5rem] [@media(hover:none)]:[--note-tab-fade-end:1.5rem]",
+                        )}
+                      >
+                        {label}
+                      </span>
+                    )}
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`Close ${label}`}
+                    title="Close"
+                    tabIndex={-1}
+                    className={cn(
+                      "absolute top-1/2 right-1 size-5 -translate-y-1/2",
+                      !selected &&
+                        "opacity-0 group-hover/tab:opacity-100 [@media(hover:none)]:opacity-100",
+                    )}
+                    onClick={() => change(closeTab(view, tab.id))}
+                  >
+                    <X className="size-3" />
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+          {/* Arrow keys already move between tabs, so these are skipped when tabbing. */}
+          {canScroll.left && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Scroll tabs left"
+              title="Scroll tabs left"
+              tabIndex={-1}
+              className="absolute inset-y-0 left-0 h-full w-7 justify-start rounded-none pl-1 text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent"
+              onClick={() => scroll(-1)}
+            >
+              <ChevronLeft />
+            </Button>
+          )}
+          {canScroll.right && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Scroll tabs right"
+              title="Scroll tabs right"
+              tabIndex={-1}
+              className="absolute inset-y-0 right-0 h-full w-7 justify-end rounded-none pr-1 text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent"
+              onClick={() => scroll(1)}
+            >
+              <ChevronRight />
+            </Button>
+          )}
         </div>
         <Button
           variant="ghost"
