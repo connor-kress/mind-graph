@@ -11,7 +11,7 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
-import { MAX_SOURCE_PAGES } from "./model";
+import { ASSET_NAME, MAX_ASSETS, MAX_RESULT_BYTES, MAX_SOURCE_PAGES } from "./model";
 import { addUsage, isOverLimit, OVER_LIMIT, usageForRequest } from "./usage";
 
 // The document runner transcribes queued sources. It asks for work over these
@@ -26,14 +26,10 @@ export const MAX_ATTEMPTS = 3;
 export const MAX_JOBS_PER_USER = 3;
 /** How far a signed request's time can be from Convex's, either way. */
 const MAX_CLOCK_SKEW_MS = 5 * 60_000;
-export const MAX_ASSETS = 200;
-/** Bytes in any one file of a result: the Markdown, or an image. */
-export const MAX_RESULT_BYTES = 10 * 1024 * 1024;
 /** Bytes in a request that isn't an upload. */
 const MAX_JSON_BYTES = 256 * 1024;
 const MAX_ERROR_LENGTH = 500;
 const CANCEL_BATCH = 100;
-const ASSET_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 const MARKDOWN_TYPE = "text/markdown; charset=utf-8";
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 

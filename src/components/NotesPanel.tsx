@@ -13,9 +13,7 @@ import { Button } from "./ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
 import { Skeleton } from "./ui/skeleton";
 
-const ACCEPT = Object.keys(SOURCE_KINDS)
-  .map((ext) => `.${ext}`)
-  .join(",");
+const ACCEPT = [...Object.keys(SOURCE_KINDS), "zip"].map((ext) => `.${ext}`).join(",");
 
 const hasFiles = (e: { dataTransfer: DataTransfer | null }) =>
   !!e.dataTransfer?.types.includes("Files");

@@ -3,6 +3,7 @@ import { ConvexError } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { httpAction } from "./_generated/server";
+import { imageTypeOf } from "./model";
 import {
   chargeEndpoint,
   claimEndpoint,
@@ -27,52 +28,85 @@ http.route({
   handler: httpAction(async () => new Response(null, { status: 204, headers: cors })),
 });
 
-/** Stores a file for an upload ticket from `sources.prepareUpload`, and adds it as a source. */
+/** A request's body, read into one buffer of the expected size rather than trusting Content-Length. */
+async function readBody(request: Request, expected: number, name: string) {
+  const bytes = new Uint8Array(expected);
+  let size = 0;
+  const reader = request.body?.getReader();
+  for (;;) {
+    const chunk = await reader?.read();
+    if (!chunk || chunk.done) break;
+    if (size + chunk.value.byteLength > expected) {
+      await reader!.cancel();
+      return { problem: `${name} is larger than when the upload started` };
+    }
+    bytes.set(chunk.value, size);
+    size += chunk.value.byteLength;
+  }
+  if (size !== expected) return { problem: `${name} didn't upload completely. Try again.` };
+  return { bytes };
+}
+
+/**
+ * Stores a file for an upload ticket from `sources.prepareUpload`, and adds it
+ * as a source. For one from `sources.prepareNoteImport`, it holds each image
+ * named in the URL on the ticket, then adds the note and all of its images.
+ */
 http.route({
   path: "/sources/upload",
   method: "POST",
   handler: httpAction(async (ctx, request) => {
-    const fail = (error: string, status = 400) =>
-      Response.json({ error }, { status, headers: cors });
-    let storageId: Id<"_storage"> | undefined;
+    const stored: Id<"_storage">[] = [];
+    const fail = async (error: string, status = 400) => {
+      await Promise.all(
+        stored.map((id) =>
+          ctx.storage
+            .delete(id)
+            .catch((cleanup) =>
+              console.error("Couldn't delete an upload that failed", id, cleanup),
+            ),
+        ),
+      );
+      return Response.json({ error }, { status, headers: cors });
+    };
+    const expired = "This upload expired. Try again.";
     try {
-      const token = new URL(request.url).searchParams.get("token");
-      const ticket = token && (await ctx.runMutation(internal.sources.claimUpload, { token }));
-      if (!ticket) return fail("This upload expired. Try again.", 403);
+      const url = new URL(request.url);
+      const token = url.searchParams.get("token");
+      const image = url.searchParams.get("image");
 
-      // Read into one buffer of the ticket's size, rather than trusting Content-Length.
-      const bytes = new Uint8Array(ticket.size);
-      let size = 0;
-      const reader = request.body?.getReader();
-      for (;;) {
-        const chunk = await reader?.read();
-        if (!chunk || chunk.done) break;
-        if (size + chunk.value.byteLength > ticket.size) {
-          await reader!.cancel();
-          return fail(`${ticket.name} is larger than when the upload started`);
-        }
-        bytes.set(chunk.value, size);
-        size += chunk.value.byteLength;
+      if (image !== null) {
+        const wanted =
+          token && (await ctx.runQuery(internal.sources.imageUpload, { token, image }));
+        if (!wanted) return await fail(expired, 403);
+        const { bytes, problem } = await readBody(request, wanted.size, image);
+        if (!bytes) return await fail(problem);
+        // The bytes say what it is, as it will be shown as whatever it's stored as.
+        const type = imageTypeOf(bytes);
+        if (!type) return await fail(`${image} isn't a PNG, JPEG, WebP, or GIF image`);
+        const storageId = await ctx.storage.store(new Blob([bytes], { type }));
+        stored.push(storageId);
+        await ctx.runMutation(internal.sources.holdImage, { token, image, storageId });
+        return Response.json({}, { headers: cors });
       }
-      if (size !== ticket.size) return fail(`${ticket.name} didn't upload completely. Try again.`);
 
+      const ticket = token && (await ctx.runMutation(internal.sources.claimUpload, { token }));
+      if (!ticket) return await fail(expired, 403);
+
+      const { bytes, problem } = await readBody(request, ticket.size, ticket.name);
+      if (!bytes) return await fail(problem);
       const type = request.headers.get("Content-Type") || "application/octet-stream";
-      storageId = await ctx.storage.store(new Blob([bytes], { type }));
+      const storageId = await ctx.storage.store(new Blob([bytes], { type }));
+      stored.push(storageId);
       const sourceId = await ctx.runMutation(internal.sources.completeUpload, {
         ...ticket,
         storageId,
       });
       return Response.json({ sourceId }, { headers: cors });
     } catch (error) {
-      if (storageId) {
-        const id = storageId;
-        await ctx.storage
-          .delete(id)
-          .catch((cleanup) => console.error("Couldn't delete an upload that failed", id, cleanup));
-      }
-      if (error instanceof ConvexError) return fail(String(error.data), 403);
+      if (error instanceof ConvexError) return await fail(String(error.data), 403);
       console.error("Upload failed", error);
-      return fail("Couldn't upload the file. Try again.", 500);
+      return await fail("Couldn't upload the file. Try again.", 500);
     }
   }),
 });

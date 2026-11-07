@@ -62,16 +62,20 @@ export function NotesMenu({ sourceId, text, onUpload, onHide, onError }: Props) 
   if (source) {
     const { title, name, kind, markdownUrl, originalUrl, assetUrls } = source;
     if (markdownUrl) {
+      const hasImages = Object.values(assetUrls).some(Boolean);
       downloads.push(
-        originalUrl
+        hasImages
           ? {
-              label: Object.values(assetUrls).some(Boolean)
-                ? "Download Markdown and images (.zip)"
-                : "Download Markdown (.md)",
+              label: "Download Markdown and images (.zip)",
               start: () => downloadNote(title, markdownUrl, assetUrls),
             }
-          : // A Markdown or text file is its own note.
-            { label: `Download note (.${kind})`, start: () => downloadFile(markdownUrl, name) },
+          : originalUrl
+            ? {
+                label: "Download Markdown (.md)",
+                start: () => downloadNote(title, markdownUrl, assetUrls),
+              }
+            : // A Markdown or text file is its own note.
+              { label: `Download note (.${kind})`, start: () => downloadFile(markdownUrl, name) },
       );
     }
     if (originalUrl) {

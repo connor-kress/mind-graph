@@ -28,7 +28,7 @@ pnpm exec tsc -p convex/tsconfig.json --noEmit
 
 Markdown and text notes are ready as soon as they're uploaded. PDF, Word and PowerPoint files wait for the [document runner](runner/README.md) to transcribe them; run it locally with `pnpm dev:runner` after setting it up.
 
-The notes panel opens notes in tabs, which each member gets back per map. A new tab lists the project's files, and picking one turns the tab into that note. A note can be downloaded as Markdown, zipped with its images if it has any, and the original file can be downloaded or opened in a new tab.
+The notes panel opens notes in tabs, which each member gets back per map. A new tab lists the project's files, and picking one turns the tab into that note. A note can be downloaded as Markdown, zipped with its images if it has any, and the original file can be downloaded or opened in a new tab. Uploading such a zip adds the note with its images, which is how to archive a note or move it to another project.
 
 The sidebar supports map search with `Ctrl`/`Cmd` + `K` and collapses with `Ctrl`/`Cmd` + `\`. Project and map actions are available from their menus or a right-click. Maps can be dragged to arrange them within their project, for everyone in it, or moved with `Shift` + `Up`/`Down`.
 
