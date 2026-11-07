@@ -32,9 +32,15 @@ importers:
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
+      hast-util-to-jsx-runtime:
+        specifier: ^2.3.7
+        version: 2.3.7
       html-to-image:
         specifier: 1.11.11
         version: 1.11.11
+      html-url-attributes:
+        specifier: ^3.0.1
+        version: 3.0.1
       katex:
         specifier: ^0.16.47
         version: 0.16.47
@@ -65,16 +71,31 @@ importers:
       remark-math:
         specifier: ^6.0.0
         version: 6.0.0
+      remark-parse:
+        specifier: ^11.0.0
+        version: 11.0.0
+      remark-rehype:
+        specifier: ^11.1.2
+        version: 11.1.2
       shadcn:
         specifier: ^4.23.0
         version: 4.23.0
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
+      unified:
+        specifier: ^11.0.5
+        version: 11.0.5
+      unist-util-visit:
+        specifier: ^5.2.0
+        version: 5.2.0
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.4(@types/node@24.19.2)(esbuild@0.27.0)(jiti@2.7.0))
+      '@types/hast':
+        specifier: ^3.0.5
+        version: 3.0.5
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2

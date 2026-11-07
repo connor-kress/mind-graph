@@ -1,6 +1,6 @@
 import { useQuery } from "convex/react";
 import { FolderOpen, Plus, X } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { MAX_NOTE_TABS } from "../../convex/model";
@@ -61,6 +61,14 @@ export function NoteTabs({
     focusActive.current = true;
     onChange(next);
   };
+  // Stable, so that changing tabs doesn't re-render the list of files behind them.
+  const latest = useRef({ view, change });
+  useLayoutEffect(() => {
+    latest.current = { view, change };
+  });
+  const openFromList = useCallback((sourceId: Id<"sources">) => {
+    latest.current.change(openNote(latest.current.view, sourceId));
+  }, []);
   useEffect(() => {
     const element = document.getElementById(tabElementId(activeId));
     // With its close button, which is beside it.
@@ -202,7 +210,7 @@ export function NoteTabs({
             projectId={projectId}
             pending={pending}
             onListed={onListed}
-            onOpen={(sourceId) => change(openNote(view, sourceId))}
+            onOpen={openFromList}
             onError={onError}
           />
           <TranscriptionUsage />

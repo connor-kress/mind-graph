@@ -1,6 +1,6 @@
 import { LockKeyhole, X } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { kindOfFile, losesImages, SOURCE_KINDS } from "../../convex/model";
@@ -54,11 +54,25 @@ export function NotesPanel({ topicId, projectId, hidden, open, onOpenChange }: P
     setShownId(projectId);
     setErrors([]);
   }
-  const onErrorIn = (projectId: Id<"projects">, message: string) =>
-    setErrors((list) => [...list, { projectId, message }]);
+  const onErrorIn = useCallback(
+    (projectId: Id<"projects">, message: string) =>
+      setErrors((list) => [...list, { projectId, message }]),
+    [],
+  );
   const shownErrors = errors.filter((error) => error.projectId === shownId);
   // Files go to the open map's project.
   const { pending, upload, forget } = useUpload(projectId ?? undefined, onErrorIn);
+  // Stable while tabs change, so that doing so doesn't re-render the notes or the list of files.
+  const projectPending = useMemo(
+    () => pending.filter((upload) => upload.projectId === projectId),
+    [pending, projectId],
+  );
+  const onNoteError = useCallback(
+    (message: string) => {
+      if (projectId) onErrorIn(projectId, message);
+    },
+    [projectId, onErrorIn],
+  );
   const tabView = useQuery(api.noteTabs.get, topicId ? { topicId } : "skip");
   const saveTabs = useMutation(api.noteTabs.set).withOptimisticUpdate(
     (store, { topicId, ...view }) => store.setQuery(api.noteTabs.get, { topicId }, view),
@@ -223,11 +237,11 @@ export function NotesPanel({ topicId, projectId, hidden, open, onOpenChange }: P
           projectId={projectId}
           view={tabView}
           onChange={changeTabs}
-          pending={pending.filter((upload) => upload.projectId === projectId)}
+          pending={projectPending}
           onListed={forget}
           onUpload={chooseFiles}
           onHide={onHide}
-          onError={(message) => onErrorIn(projectId, message)}
+          onError={onNoteError}
           banner={banner}
         />
       )}

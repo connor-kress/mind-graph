@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
-import { useEffect, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { ScrollArea } from "../components/ui/scroll-area";
@@ -42,7 +42,7 @@ function useContent(url: string | null) {
 }
 
 /** A source's note, or why it can't be read yet. */
-export function SourceReader({ sourceId, textSize }: Props) {
+export const SourceReader = memo(function SourceReader({ sourceId, textSize }: Props) {
   const source = useQuery(api.sources.open, { sourceId });
   const retry = useMutation(api.sources.retry);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -105,7 +105,9 @@ export function SourceReader({ sourceId, textSize }: Props) {
             // Plain text isn't Markdown, so show it as written.
             <p className="leading-[2] whitespace-pre-wrap text-muted-foreground">{content.text}</p>
           ) : (
-            <Markdown assets={source.assetUrls}>{content.text}</Markdown>
+            <Markdown assets={source.assetUrls} placeholder={<NoteSkeleton />}>
+              {content.text}
+            </Markdown>
           )}
         </div>
       </ScrollArea>
@@ -113,15 +115,23 @@ export function SourceReader({ sourceId, textSize }: Props) {
   }
 
   return body;
-}
+});
 
-function Loading() {
+function NoteSkeleton() {
   return (
-    <div role="status" aria-label="Loading note" className="space-y-3 p-5">
+    <div role="status" aria-label="Loading note" className="space-y-3">
       <Skeleton className="h-5 w-2/3" />
       <Skeleton className="h-4 w-full" />
       <Skeleton className="h-4 w-full" />
       <Skeleton className="h-4 w-4/5" />
+    </div>
+  );
+}
+
+function Loading() {
+  return (
+    <div className="p-5">
+      <NoteSkeleton />
     </div>
   );
 }

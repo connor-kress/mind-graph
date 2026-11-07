@@ -1,6 +1,6 @@
 import { useMutation } from "convex/react";
 import { ConvexError } from "convex/values";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { fileProblem, kindOfFile } from "../../convex/model";
@@ -39,13 +39,13 @@ export function useUpload(
     };
   }, []);
   /** Stops showing uploads, e.g. once the list has their sources. */
-  const forget = (ids: string[]) => {
+  const forget = useCallback((ids: string[]) => {
     for (const id of ids) {
       clearTimeout(timers.current.get(id));
       timers.current.delete(id);
     }
     setPending((uploads) => uploads.filter((upload) => !ids.includes(upload.id)));
-  };
+  }, []);
 
   const uploadOne = async (projectId: Id<"projects">, file: File) => {
     const problem = fileProblem(file.name, file.size);

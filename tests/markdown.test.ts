@@ -1,10 +1,19 @@
-import { createElement } from "react";
+import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { followNoteLink } from "../src/sources/followNoteLink";
-import { Markdown } from "../src/sources/Markdown";
+import { noteBlocks, renderBlock, type NoteAssets } from "../src/sources/noteBlocks";
 
-const render = (markdown: string) => renderToStaticMarkup(createElement(Markdown, null, markdown));
+const render = (markdown: string, assets: NoteAssets = {}) =>
+  renderToStaticMarkup(
+    createElement(
+      Fragment,
+      null,
+      ...noteBlocks(markdown).map((block, key) =>
+        createElement(Fragment, { key }, renderBlock(block, assets)),
+      ),
+    ),
+  );
 
 describe("notes as rendered", () => {
   test("display math the runner fences renders whole, also in a list", () => {
@@ -24,13 +33,9 @@ describe("notes as rendered", () => {
   });
 
   test("only the note's own images are shown", () => {
-    const html = renderToStaticMarkup(
-      createElement(
-        Markdown,
-        { assets: { "p1-a": "https://files.test/a.png" } },
-        "![A](asset:p1-a) ![B](asset:p1-b) ![C](asset:toString) [D](asset:p1-a)",
-      ),
-    );
+    const html = render("![A](asset:p1-a) ![B](asset:p1-b) ![C](asset:toString) [D](asset:p1-a)", {
+      "p1-a": "https://files.test/a.png",
+    });
     expect(html).toContain('<img src="https://files.test/a.png" alt="A" loading="lazy"/>');
     expect(html).toContain("[B]");
     expect(html).toContain("[C]");
@@ -53,6 +58,20 @@ describe("notes as rendered", () => {
     expect(ref![0]).not.toContain("_blank");
     // The footnote links back to the reference.
     expect(html).toContain(`href="#${ref![2]}"`);
+  });
+});
+
+describe("a note's blocks", () => {
+  test("a note can have none, despite having text", () => {
+    expect(noteBlocks("<!-- a comment -->\n\n[label]: https://example.com")).toEqual([]);
+  });
+
+  test("references and footnotes work across them", () => {
+    const html = render(
+      "[a link][label] and a claim.[^1]\n\nNext.\n\n[label]: https://a.test\n[^1]: Why.",
+    );
+    expect(html).toContain('href="https://a.test"');
+    expect(html).toContain("Why.");
   });
 });
 
