@@ -20,6 +20,7 @@ const ACCEPT = Object.keys(SOURCE_KINDS)
 const hasFiles = (e: { dataTransfer: DataTransfer | null }) =>
   !!e.dataTransfer?.types.includes("Files");
 
+const activeTabStorageKey = (topicId: Id<"topics">) => `mind-graph:note-tab:${topicId}`;
 const WIDTH_STORAGE_KEY = "mind-graph:notes-panel-width";
 const DEFAULT_WIDTH = 420;
 const MIN_WIDTH = 256;
@@ -73,15 +74,35 @@ export function NotesPanel({ topicId, projectId, hidden, open, onOpenChange }: P
     },
     [projectId, onErrorIn],
   );
-  const tabView = useQuery(api.noteTabs.get, topicId ? { topicId } : "skip");
-  const saveTabs = useMutation(api.noteTabs.set).withOptimisticUpdate(
-    (store, { topicId, ...view }) => store.setQuery(api.noteTabs.get, { topicId }, view),
+  const openTabs = useQuery(api.noteTabs.get, topicId ? { topicId } : "skip");
+  const saveTabs = useMutation(api.noteTabs.set).withOptimisticUpdate((store, { topicId, tabs }) =>
+    store.setQuery(api.noteTabs.get, { topicId }, tabs),
+  );
+  // Which tab is showing is kept in this browser, not with the tabs, so it follows nothing
+  // elsewhere. It's read as a map opens, for other windows here to go their own way too.
+  const [chosen, setChosen] = useState<{ topicId: Id<"topics">; tabId: string | null } | null>(
+    null,
+  );
+  if (topicId && chosen?.topicId !== topicId) {
+    setChosen({ topicId, tabId: localStorage.getItem(activeTabStorageKey(topicId)) });
+  }
+  const chosenId = chosen?.topicId === topicId ? chosen?.tabId : undefined;
+  const tabView = useMemo<TabView | undefined>(
+    () =>
+      openTabs && {
+        tabs: openTabs,
+        activeId: openTabs.some((tab) => tab.id === chosenId) ? chosenId! : openTabs[0].id,
+      },
+    [openTabs, chosenId],
   );
   // Nothing can be added while the map loads, or its tabs, one of which shows the upload.
   const canAdd = !!projectId && !!tabView;
   const changeTabs = (view: TabView) => {
     if (!topicId) return;
-    saveTabs({ topicId, ...view }).catch((error) => {
+    setChosen({ topicId, tabId: view.activeId });
+    localStorage.setItem(activeTabStorageKey(topicId), view.activeId);
+    if (view.tabs === openTabs) return;
+    saveTabs({ topicId, tabs: view.tabs }).catch((error) => {
       console.error(error);
       if (projectId) onErrorIn(projectId, "Couldn't save your open tabs");
     });

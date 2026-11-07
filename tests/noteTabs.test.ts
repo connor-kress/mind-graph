@@ -15,7 +15,7 @@ import {
 
 const modules = import.meta.glob("../convex/**/*.ts");
 
-const FRESH = { tabs: [{ id: "files" }], activeId: "files" };
+const FRESH = [{ id: "files" }];
 
 async function fixture() {
   const t = convexTest(schema, modules);
@@ -41,7 +41,7 @@ async function fixture() {
 }
 
 describe("saved note tabs", () => {
-  test("a map starts on one Files tab", async () => {
+  test("a map starts on one tab of files", async () => {
     const { alice, topicId } = await fixture();
     expect(await alice.query(api.noteTabs.get, { topicId })).toEqual(FRESH);
   });
@@ -49,9 +49,9 @@ describe("saved note tabs", () => {
   test("are remembered per map and per user", async () => {
     const { t, alice, bob, projectId, topicId, addNote } = await fixture();
     const sourceId = await addNote("Lecture");
-    const view = { tabs: [{ id: "a", sourceId }, { id: "b" }], activeId: "a" };
-    await alice.mutation(api.noteTabs.set, { topicId, ...view });
-    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual(view);
+    const tabs = [{ id: "a", sourceId }, { id: "b" }];
+    await alice.mutation(api.noteTabs.set, { topicId, tabs });
+    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual(tabs);
 
     const other = await alice.mutation(api.library.createMap, { projectId, title: "Krebs" });
     expect(await alice.query(api.noteTabs.get, { topicId: other })).toEqual(FRESH);
@@ -66,48 +66,30 @@ describe("saved note tabs", () => {
     expect(await bob.query(api.noteTabs.get, { topicId })).toEqual(FRESH);
   });
 
-  test("saving again replaces them", async () => {
+  test("saving again replaces them, in the order given", async () => {
     const { t, alice, topicId } = await fixture();
-    await alice.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "a" }], activeId: "a" });
-    await alice.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "b" }], activeId: "b" });
-    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual({
-      tabs: [{ id: "b" }],
-      activeId: "b",
-    });
+    await alice.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "a" }, { id: "b" }] });
+    await alice.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "b" }, { id: "a" }] });
+    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual([{ id: "b" }, { id: "a" }]);
     expect(await t.run((ctx) => ctx.db.query("noteTabs").collect())).toHaveLength(1);
   });
 
-  test("lose a deleted note, going to the next tab along", async () => {
+  test("lose a deleted note", async () => {
     const { alice, topicId, addNote } = await fixture();
-    const [first, second, third] = await Promise.all(["1", "2", "3"].map((n) => addNote(n)));
+    const [first, second] = await Promise.all(["1", "2"].map((n) => addNote(n)));
     const tabs = [
       { id: "a", sourceId: first },
       { id: "b", sourceId: second },
-      { id: "c", sourceId: third },
     ];
-    await alice.mutation(api.noteTabs.set, { topicId, tabs, activeId: "b" });
-
+    await alice.mutation(api.noteTabs.set, { topicId, tabs });
     await alice.mutation(api.sources.remove, { sourceId: second });
-    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual({
-      tabs: [tabs[0], tabs[2]],
-      activeId: "c",
-    });
-
-    await alice.mutation(api.sources.remove, { sourceId: third });
-    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual({
-      tabs: [tabs[0]],
-      activeId: "a",
-    });
+    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual([tabs[0]]);
   });
 
-  test("go back to Files when no note is left", async () => {
+  test("go back to the files when no note is left", async () => {
     const { alice, topicId, addNote } = await fixture();
     const sourceId = await addNote("Lecture");
-    await alice.mutation(api.noteTabs.set, {
-      topicId,
-      tabs: [{ id: "a", sourceId }],
-      activeId: "a",
-    });
+    await alice.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "a", sourceId }] });
     await alice.mutation(api.sources.remove, { sourceId });
     expect(await alice.query(api.noteTabs.get, { topicId })).toEqual(FRESH);
   });
@@ -119,29 +101,21 @@ describe("saved note tabs", () => {
     await alice.mutation(api.noteTabs.set, {
       topicId,
       tabs: [{ id: "a", sourceId }, { id: "b" }],
-      activeId: "a",
     });
-    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual({
-      tabs: [{ id: "b" }],
-      activeId: "b",
-    });
+    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual([{ id: "b" }]);
   });
 
   test("are refused when they don't make sense", async () => {
     const { alice, topicId } = await fixture();
     const refused = [
-      { tabs: [], activeId: "a" },
-      { tabs: [{ id: "a" }], activeId: "b" },
-      { tabs: [{ id: "" }], activeId: "" },
-      { tabs: [{ id: "a".repeat(65) }], activeId: "a".repeat(65) },
-      { tabs: [{ id: "a" }, { id: "a" }], activeId: "a" },
-      {
-        tabs: Array.from({ length: MAX_NOTE_TABS + 1 }, (_, i) => ({ id: String(i) })),
-        activeId: "0",
-      },
+      [],
+      [{ id: "" }],
+      [{ id: "a".repeat(65) }],
+      [{ id: "a" }, { id: "a" }],
+      Array.from({ length: MAX_NOTE_TABS + 1 }, (_, i) => ({ id: String(i) })),
     ];
-    for (const view of refused) {
-      await expect(alice.mutation(api.noteTabs.set, { topicId, ...view })).rejects.toThrow(
+    for (const tabs of refused) {
+      await expect(alice.mutation(api.noteTabs.set, { topicId, tabs })).rejects.toThrow(
         "Invalid note tabs",
       );
     }
@@ -151,27 +125,31 @@ describe("saved note tabs", () => {
     const { alice, topicId, addNote } = await fixture();
     const sourceId = await addNote("Lecture");
     const tabs = [{ id: "a", sourceId }, { id: "b", sourceId }, { id: "c" }];
-    await alice.mutation(api.noteTabs.set, { topicId, tabs, activeId: "b" });
-    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual({ tabs, activeId: "b" });
+    await alice.mutation(api.noteTabs.set, { topicId, tabs });
+    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual(tabs);
 
     await alice.mutation(api.sources.remove, { sourceId });
-    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual({
-      tabs: [{ id: "c" }],
-      activeId: "c",
-    });
+    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual([{ id: "c" }]);
   });
 
   test("are private to the project's members", async () => {
     const { bob, topicId } = await fixture();
     expect(await bob.query(api.noteTabs.get, { topicId })).toEqual(FRESH);
-    await expect(
-      bob.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "a" }], activeId: "a" }),
-    ).rejects.toThrow("Project not found");
+    await expect(bob.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "a" }] })).rejects.toThrow(
+      "Project not found",
+    );
+  });
+
+  test("don't save which is showing", async () => {
+    const { t, alice, topicId } = await fixture();
+    await alice.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "a" }, { id: "b" }] });
+    const [saved] = await t.run((ctx) => ctx.db.query("noteTabs").collect());
+    expect(saved).not.toHaveProperty("activeId");
   });
 
   test("go with their map, which then reads as fresh", async () => {
     const { t, alice, topicId } = await fixture();
-    await alice.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "a" }], activeId: "a" });
+    await alice.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "a" }] });
     await alice.mutation(api.library.deleteMap, { topicId });
     expect(await t.run((ctx) => ctx.db.query("noteTabs").collect())).toEqual([]);
     expect(await alice.query(api.noteTabs.get, { topicId })).toEqual(FRESH);
@@ -179,7 +157,7 @@ describe("saved note tabs", () => {
 
   test("go with their project", async () => {
     const { t, alice, projectId, topicId } = await fixture();
-    await alice.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "a" }], activeId: "a" });
+    await alice.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "a" }] });
     await alice.mutation(api.library.deleteProject, { projectId, confirmation: "Biology" });
     expect(await t.run((ctx) => ctx.db.query("noteTabs").collect())).toEqual([]);
   });
