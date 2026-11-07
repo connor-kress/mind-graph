@@ -152,12 +152,11 @@ export default defineSchema({
     .index("by_token", ["token"])
     .index("by_project", ["projectId"]),
 
-  // The tabs a member left open in the notes panel, remembered per map.
+  // The tabs a member has open in the notes panel, remembered per map.
   noteTabs: defineTable({
     topicId: v.id("topics"),
     userId: v.string(),
     tabs: v.array(noteTabValidator),
-    activeId: v.string(),
   }).index("by_topic_user", ["topicId", "userId"]),
 
   maps: defineTable({
