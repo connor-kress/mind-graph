@@ -160,7 +160,7 @@ export function NotesMenu({ sourceId, text, onUpload, onHide, onError }: Props) 
         )}
         <DropdownMenuItem disabled={!onUpload} onSelect={onUpload}>
           <Upload />
-          Upload files
+          Upload file
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={onHide}>
           <PanelRightClose />

@@ -10,8 +10,9 @@ import { cn } from "../lib/utils";
 import { NotesBar, NotesMenu } from "./NotesMenu";
 import { SourceList } from "./SourceList";
 import { SourceReader } from "./SourceReader";
-import { addFilesTab, closeTab, openNote, type TabView } from "./tabView";
+import { addFilesTab, closeTab, moveTab, openNote, type TabView } from "./tabView";
 import { TranscriptionUsage } from "./TranscriptionUsage";
+import { useTabDrag } from "./useTabDrag";
 import { useTextSize } from "./useTextSize";
 import type { PendingUpload } from "./useUpload";
 
@@ -33,6 +34,13 @@ const panelElementId = (sourceId?: Id<"sources">) => `note-panel-${sourceId ?? "
 
 /** Keeps a panel's place while it's out of sight, without laying it out. */
 const OUT_OF_SIGHT = "invisible [content-visibility:hidden]";
+
+/** Brings a tab and its close button, which is beside it, into view at once. */
+const REVEAL_TAB: ScrollIntoViewOptions = {
+  behavior: "instant",
+  block: "nearest",
+  inline: "nearest",
+};
 
 /** How much of a row's width to scroll by at a time, leaving some context in view. */
 const SCROLL_FRACTION = 0.75;
@@ -105,21 +113,23 @@ export function NoteTabs({
   }, []);
   useEffect(() => {
     if (focusActive.current) {
-      document.getElementById(tabElementId(activeId))?.focus({ preventScroll: true });
+      const element = document.getElementById(tabElementId(activeId));
+      element?.focus({ preventScroll: true });
+      element?.parentElement?.scrollIntoView(REVEAL_TAB);
     }
     focusActive.current = false;
   }, [view, activeId]);
 
   // Titles widen tabs, so the row depends on them as well as on which are open.
-  const { row, canScroll, scroll } = useScrollableRow(
-    `${tabs.map((tab) => tab.sourceId ?? "").join()} ${sources?.map((source) => source.title).join()}`,
+  const rowContents = `${tabs.map((tab) => tab.id + (tab.sourceId ?? "")).join()} ${sources?.map((source) => source.title).join()}`;
+  const { row, canScroll, scroll } = useScrollableRow(rowContents);
+  // Directly, so that where a tab is dropped stays in view rather than the active tab.
+  const { drag, handlers, shiftOf, endedDrag } = useTabDrag(row, rowContents, (id, to) =>
+    onChange(moveTab(view, id, to)),
   );
   // Not on every change of the view, which would undo scrolling to look at other tabs.
   useEffect(() => {
-    document
-      .getElementById(tabElementId(activeId))
-      // With its close button, which is beside it.
-      ?.parentElement?.scrollIntoView({ behavior: "instant", block: "nearest", inline: "nearest" });
+    document.getElementById(tabElementId(activeId))?.parentElement?.scrollIntoView(REVEAL_TAB);
   }, [activeId, active.sourceId, tabs.length]);
 
   return (
@@ -154,7 +164,9 @@ export function NoteTabs({
                 End: tabs.length - 1,
               };
               if (e.key === "Delete") change(closeTab(view, active.id));
-              else if (e.key in to) {
+              else if (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+                if (tabs[to[e.key]]) change(moveTab(view, active.id, to[e.key]));
+              } else if (e.key in to) {
                 const tab = tabs[(to[e.key] + tabs.length) % tabs.length];
                 if (tab !== active) change({ tabs, activeId: tab.id });
               } else return;
@@ -162,18 +174,26 @@ export function NoteTabs({
               e.stopPropagation();
             }}
           >
-            {tabs.map((tab) => {
+            {tabs.map((tab, index) => {
               const source = sources?.find(({ _id }) => _id === tab.sourceId);
               const selected = tab === active;
-              const label = tab.sourceId ? (source?.title ?? "Note") : "Files";
+              const label = tab.sourceId ? (source?.title ?? "Note") : "New tab";
+              const shift = shiftOf(index);
               return (
                 <div
                   key={tab.id}
+                  {...handlers(tab.id, index)}
+                  style={shift ? { transform: `translateX(${shift}px)` } : undefined}
                   className={cn(
-                    "group/tab relative flex max-w-44 min-w-0 shrink-0 items-center border-r text-xs",
+                    "group/tab relative flex max-w-44 min-w-0 shrink-0 items-center border-r text-xs select-none",
                     selected
                       ? "bg-background text-foreground"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    // Only while dragging, or the tabs would slide again as they settle into place.
+                    drag &&
+                      (drag.id === tab.id
+                        ? "z-10 cursor-grabbing bg-background text-foreground shadow-md"
+                        : "motion-safe:transition-transform motion-safe:duration-150"),
                   )}
                   // Middle-click closes a tab, as in a browser, instead of starting to scroll.
                   onMouseDown={(e) => {
@@ -198,7 +218,7 @@ export function NoteTabs({
                     title={source ? `${source.title}\n${source.name}` : undefined}
                     className="flex h-full w-full min-w-0 items-center gap-1.5 pl-2.5 outline-none focus-visible:underline focus-visible:underline-offset-4"
                     onClick={() => {
-                      if (!selected) change({ tabs, activeId: tab.id });
+                      if (!selected && !endedDrag()) change({ tabs, activeId: tab.id });
                     }}
                   >
                     {!tab.sourceId && <FolderOpen aria-hidden className="size-3.5 shrink-0" />}
@@ -228,6 +248,7 @@ export function NoteTabs({
                       !selected &&
                         "opacity-0 group-hover/tab:opacity-100 [@media(hover:none)]:opacity-100",
                     )}
+                    onPointerDown={(e) => e.stopPropagation()}
                     onClick={() => change(closeTab(view, tab.id))}
                   >
                     <X className="size-3" />
@@ -294,24 +315,24 @@ export function NoteTabs({
           />
           <TranscriptionUsage />
         </div>
-        {tabs.map(
-          ({ id, sourceId }) =>
-            sourceId &&
-            shown.has(sourceId) && (
-              <div
-                key={sourceId}
-                role="tabpanel"
-                id={panelElementId(sourceId)}
-                aria-labelledby={tabElementId(id)}
-                className={cn(
-                  "absolute inset-0 flex flex-col bg-background",
-                  id !== active.id && OUT_OF_SIGHT,
-                )}
-              >
-                <SourceReader sourceId={sourceId} textSize={text.size} />
-              </div>
-            ),
-        )}
+        {/* In an order of their own: moving one in the page would lose its place in the note. */}
+        {tabs
+          .filter(({ sourceId }) => sourceId && shown.has(sourceId))
+          .sort((a, b) => a.sourceId!.localeCompare(b.sourceId!))
+          .map(({ id, sourceId }) => (
+            <div
+              key={sourceId}
+              role="tabpanel"
+              id={panelElementId(sourceId)}
+              aria-labelledby={tabElementId(id)}
+              className={cn(
+                "absolute inset-0 flex flex-col bg-background",
+                id !== active.id && OUT_OF_SIGHT,
+              )}
+            >
+              <SourceReader sourceId={sourceId!} textSize={text.size} />
+            </div>
+          ))}
       </div>
     </>
   );
