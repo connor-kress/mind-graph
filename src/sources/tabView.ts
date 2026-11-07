@@ -14,11 +14,10 @@ export function openNote({ tabs, activeId }: TabView, sourceId: NoteTab["sourceI
   return { tabs: tabs.map((tab) => (tab.id === activeId ? { ...tab, sourceId } : tab)), activeId };
 }
 
-/** Closes a tab, going to the next one along if it was showing. The last becomes a new Files tab. */
+/** Closes a tab, going to the next one along if it was showing. Closing the last leaves none. */
 export function closeTab({ tabs, activeId }: TabView, id: string): TabView {
   const left = tabs.filter((tab) => tab.id !== id);
-  if (!left.length) return addFilesTab({ tabs: left });
-  if (id !== activeId) return { tabs: left, activeId };
+  if (!left.length || id !== activeId) return { tabs: left, activeId };
   const index = tabs.findIndex((tab) => tab.id === id);
   return { tabs: left, activeId: left[Math.min(index, left.length - 1)].id };
 }

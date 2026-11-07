@@ -119,6 +119,9 @@ export const noteTabValidator = v.object({
 
 export type NoteTab = Infer<typeof noteTabValidator>;
 
+/** What a map shows before any tabs are saved, and once none are left open. */
+export const DEFAULT_NOTE_TABS: NoteTab[] = [{ id: "files" }];
+
 /** Tabs someone can have open at once on a map. */
 export const MAX_NOTE_TABS = 20;
 

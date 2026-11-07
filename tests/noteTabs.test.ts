@@ -40,6 +40,17 @@ describe("saved note tabs", () => {
     expect(await alice.query(api.noteTabs.get, { topicId })).toEqual(FRESH);
   });
 
+  test("closing them all clears what's saved, so the map starts over", async () => {
+    const { t, alice, topicId } = await fixture();
+    await alice.mutation(api.noteTabs.set, { topicId, tabs: [{ id: "a" }] });
+    await alice.mutation(api.noteTabs.set, { topicId, tabs: [] });
+    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual(FRESH);
+    expect(await t.run((ctx) => ctx.db.query("noteTabs").collect())).toEqual([]);
+    // And with nothing saved yet.
+    await alice.mutation(api.noteTabs.set, { topicId, tabs: [] });
+    expect(await alice.query(api.noteTabs.get, { topicId })).toEqual(FRESH);
+  });
+
   test("are remembered per map and per user", async () => {
     const { t, alice, bob, projectId, topicId, addNote } = await fixture();
     const sourceId = await addNote("Lecture");
@@ -102,7 +113,6 @@ describe("saved note tabs", () => {
   test("are refused when they don't make sense", async () => {
     const { alice, topicId } = await fixture();
     const refused = [
-      [],
       [{ id: "" }],
       [{ id: "a".repeat(65) }],
       [{ id: "a" }, { id: "a" }],
@@ -195,12 +205,8 @@ describe("changing tabs", () => {
     expect(closeTab({ tabs, activeId: "b" }, "a")).toEqual({ tabs: [{ id: "b" }], activeId: "b" });
   });
 
-  test("closing the last tab leaves a new Files tab", () => {
-    const view = closeTab({ tabs: [{ id: "a", sourceId: one }], activeId: "a" }, "a");
-    expect(view.tabs).toHaveLength(1);
-    expect(view.tabs[0].id).not.toBe("a");
-    expect(view.tabs[0].sourceId).toBeUndefined();
-    expect(view.activeId).toBe(view.tabs[0].id);
+  test("closing the last tab leaves none", () => {
+    expect(closeTab({ tabs: [{ id: "a", sourceId: one }], activeId: "a" }, "a").tabs).toEqual([]);
   });
 
   describe("moving a tab", () => {
