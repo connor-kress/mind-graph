@@ -140,7 +140,8 @@ export const SourceList = memo(function SourceList({
         <p className="font-medium text-foreground">No source notes yet</p>
         <p className="mt-1 leading-6 text-muted-foreground">
           Drag files here or choose Upload file in the menu above. Markdown, text, Word, PDF, and
-          PowerPoint files up to {MAX_SOURCE_BYTES / 1024 / 1024} MB and {MAX_SOURCE_PAGES} pages.
+          PowerPoint files up to {MAX_SOURCE_BYTES / 1024 / 1024} MB and {MAX_SOURCE_PAGES} pages,
+          or a zip of a note and its images.
         </p>
       </div>
     );
@@ -266,7 +267,8 @@ export const SourceList = memo(function SourceList({
           .filter((upload) => !listed.includes(upload.id))
           .map((upload) => (
             <li key={upload.id} className="flex items-center gap-3 px-2 py-2 opacity-60">
-              <FileIcon kind={kindOfFile(upload.name)} />
+              {/* Whatever else was accepted is a zip of a note. */}
+              <FileIcon kind={kindOfFile(upload.name) ?? "md"} />
               <span className="min-w-0">
                 <span className="block truncate text-sm text-foreground">
                   {titleFromFileName(upload.name)}

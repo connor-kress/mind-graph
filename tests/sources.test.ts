@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import {
+  MAX_ASSETS,
+  MAX_RESULT_BYTES,
   MAX_SOURCE_BYTES,
   MAX_SOURCE_NAME_LENGTH,
   MAX_SOURCE_TITLE_LENGTH,
@@ -320,6 +322,171 @@ describe("source notes", () => {
     expect(await t.run((ctx) => ctx.db.query("sourceUploads").collect())).toEqual([]);
     expect((await post(t, deleted, "1")).status).toBe(403);
     expect(await storedFiles(t)).toBe(0);
+  });
+
+  describe("importing a note with its images", () => {
+    const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+    const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 2]);
+    const MARKDOWN = "![a](asset:img1) ![b](asset:img2)";
+    const images = [
+      { name: "img1", size: PNG.length },
+      { name: "img2", size: JPEG.length },
+    ];
+
+    const prepareImport = (user: User, projectId: Id<"projects">) =>
+      user.mutation(api.sources.prepareNoteImport, {
+        projectId,
+        name: "Cells.md",
+        size: MARKDOWN.length,
+        images,
+      });
+
+    test("adds the note and its images together", async () => {
+      const { t, alice, projectId } = await fixture();
+      const { url, imageUrls } = await prepareImport(alice, projectId);
+      expect((await post(t, imageUrls[0], PNG)).status).toBe(200);
+      expect((await post(t, imageUrls[1], JPEG)).status).toBe(200);
+      // Not a note until all of it has arrived.
+      expect(await alice.query(api.sources.list, { projectId })).toEqual([]);
+
+      const { sourceId } = (await (await post(t, url, MARKDOWN)).json()) as UploadResult;
+      const source = await alice.query(api.sources.open, { sourceId: sourceId! });
+      expect(source).toMatchObject({
+        title: "Cells",
+        kind: "md",
+        status: "ready",
+        originalUrl: null,
+      });
+      expect(Object.keys(source!.assetUrls).sort()).toEqual(["img1", "img2"]);
+      expect(await markdownOf(t, sourceId!)).toBe(MARKDOWN);
+      const types = await t.run(async (ctx) =>
+        (await ctx.db.system.query("_storage").collect()).map((file) => file.contentType),
+      );
+      expect(types).toEqual(expect.arrayContaining(["image/png", "image/jpeg"]));
+      expect(await t.run((ctx) => ctx.db.query("sourceUploads").collect())).toEqual([]);
+
+      await alice.mutation(api.sources.remove, { sourceId: sourceId! });
+      expect(await storedFiles(t)).toBe(0);
+      expect(await t.run((ctx) => ctx.db.query("sourceAssets").collect())).toEqual([]);
+    });
+
+    test("stores an image only if it is one, of the size asked for, and once", async () => {
+      const { t, alice, projectId } = await fixture();
+      const { imageUrls } = await prepareImport(alice, projectId);
+      // The right size, but its bytes aren't an image, whatever the request calls them.
+      const svg = new TextEncoder().encode("<svg xml");
+      const refused = await t.fetch(imageUrls[0].slice(imageUrls[0].indexOf("/sources/upload")), {
+        method: "POST",
+        headers: { "Content-Type": "image/png" },
+        body: svg.slice(0, PNG.length),
+      });
+      expect(refused.status).toBe(400);
+      expect((await post(t, imageUrls[0], PNG.slice(1))).status).toBe(400);
+      expect((await post(t, imageUrls[0], new Uint8Array(PNG.length + 1))).status).toBe(400);
+      expect(await storedFiles(t)).toBe(0);
+
+      expect((await post(t, imageUrls[0], PNG)).status).toBe(200);
+      expect((await post(t, imageUrls[0], PNG)).status).toBe(403);
+      expect(await storedFiles(t)).toBe(1);
+      const url = imageUrls[0].replace("image=img1", "image=other");
+      expect((await post(t, url, PNG)).status).toBe(403);
+    });
+
+    test("a note sent before its images ends the ticket and deletes what was sent", async () => {
+      const { t, alice, projectId } = await fixture();
+      const { url, imageUrls } = await prepareImport(alice, projectId);
+      await post(t, imageUrls[0], PNG);
+      expect((await post(t, url, MARKDOWN)).status).toBe(403);
+      expect(await storedFiles(t)).toBe(0);
+      expect(await alice.query(api.sources.list, { projectId })).toEqual([]);
+      expect((await post(t, imageUrls[1], JPEG)).status).toBe(403);
+    });
+
+    test("images wait for the ticket to expire if the note doesn't arrive whole", async () => {
+      const { t, alice, projectId } = await fixture();
+      const { url, imageUrls } = await prepareImport(alice, projectId);
+      await post(t, imageUrls[0], PNG);
+      await post(t, imageUrls[1], JPEG);
+      expect((await post(t, url, MARKDOWN.slice(1))).status).toBe(400);
+      // A ticket is used once, even so.
+      expect((await post(t, url, MARKDOWN)).status).toBe(403);
+      expect(await alice.query(api.sources.list, { projectId })).toEqual([]);
+      expect(await storedFiles(t)).toBe(2);
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+      expect(await storedFiles(t)).toBe(0);
+    });
+
+    test("a note isn't added without its images if its ticket expires as it arrives", async () => {
+      const { t, alice, projectId } = await fixture();
+      const { url, imageUrls } = await prepareImport(alice, projectId);
+      await post(t, imageUrls[0], PNG);
+      await post(t, imageUrls[1], JPEG);
+      const token = decodeURIComponent(url.slice(url.indexOf("token=") + "token=".length));
+      const claim = await t.mutation(internal.sources.claimUpload, { token });
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+      expect(await storedFiles(t)).toBe(0);
+      const storageId = await t.run((ctx) => ctx.storage.store(new Blob([MARKDOWN])));
+      await expect(
+        t.mutation(internal.sources.completeUpload, { ...claim!, storageId }),
+      ).rejects.toThrow("This upload expired");
+      expect(await alice.query(api.sources.list, { projectId })).toEqual([]);
+    });
+
+    test("images are deleted if the ticket expires or its project is deleted", async () => {
+      const { t, alice, projectId } = await fixture();
+      const expiring = await prepareImport(alice, projectId);
+      await post(t, expiring.imageUrls[0], PNG);
+      expect(await storedFiles(t)).toBe(1);
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+      expect(await storedFiles(t)).toBe(0);
+      expect((await post(t, expiring.imageUrls[1], JPEG)).status).toBe(403);
+      expect(await storedFiles(t)).toBe(0);
+
+      const deleting = await prepareImport(alice, projectId);
+      await post(t, deleting.imageUrls[0], PNG);
+      await alice.mutation(api.library.deleteProject, { projectId, confirmation: "Biology" });
+      expect(await storedFiles(t)).toBe(0);
+      expect((await post(t, deleting.imageUrls[1], JPEG)).status).toBe(403);
+      expect(await storedFiles(t)).toBe(0);
+    });
+
+    test("nothing is stored for someone who's left the project", async () => {
+      const { t, alice, bob, projectId } = await fixture();
+      const membershipId = await t.run((ctx) =>
+        ctx.db.insert("projectMembers", {
+          projectId,
+          userId: "https://clerk.test|bob",
+          role: "member",
+        }),
+      );
+      const { url, imageUrls } = await prepareImport(bob, projectId);
+      await post(t, imageUrls[0], PNG);
+      await t.run((ctx) => ctx.db.delete(membershipId));
+      expect((await post(t, imageUrls[1], JPEG)).status).toBe(403);
+      expect((await post(t, url, MARKDOWN)).status).toBe(403);
+      expect(await storedFiles(t)).toBe(0);
+      expect(await alice.query(api.sources.list, { projectId })).toEqual([]);
+    });
+
+    test("only a member can start one, within the limits", async () => {
+      const { alice, bob, projectId } = await fixture();
+      await expect(prepareImport(bob, projectId)).rejects.toThrow();
+      const start = (name: string, size: number, images: { name: string; size: number }[]) =>
+        alice
+          .mutation(api.sources.prepareNoteImport, { projectId, name, size, images })
+          .catch((error: ConvexError<string>) => error.data);
+      const image = { name: "img1", size: 1 };
+      expect(await start("a.pdf", 1, [])).toBe("a.pdf isn't a Markdown note");
+      expect(await start("a.md", MAX_SOURCE_BYTES + 1, [])).toBe("a.md is larger than 15 MB");
+      expect(await start("a.md", 1, [image, image])).toBe("Invalid images");
+      expect(await start("a.md", 1, [{ name: "../x", size: 1 }])).toBe("Invalid images");
+      expect(await start("a.md", 1, [{ name: "img1", size: 0 }])).toBe("Invalid images");
+      expect(await start("a.md", 1, [{ name: "img1", size: MAX_RESULT_BYTES + 1 }])).toBe(
+        "a.md has an image larger than 10 MB",
+      );
+      const many = Array.from({ length: MAX_ASSETS + 1 }, (_, i) => ({ name: `i${i}`, size: 1 }));
+      expect(await start("a.md", 1, many)).toBe(`a.md has more than ${MAX_ASSETS} images`);
+    });
   });
 
   test("a file is added only if its user can still add to the project once it's stored", async () => {

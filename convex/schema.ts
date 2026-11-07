@@ -150,6 +150,18 @@ export default defineSchema({
     name: v.string(),
     size: v.number(),
     expiresAt: v.number(),
+    /** For a note imported with its images, which are sent first and held here until it's added. */
+    images: v.optional(
+      v.array(
+        v.object({
+          name: v.string(),
+          size: v.number(),
+          storageId: v.optional(v.id("_storage")),
+        }),
+      ),
+    ),
+    /** Its note has started to arrive, so the ticket only waits to be finished or to expire. */
+    claimed: v.optional(v.boolean()),
   })
     .index("by_token", ["token"])
     .index("by_project", ["projectId"]),

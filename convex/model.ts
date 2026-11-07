@@ -81,6 +81,26 @@ export const MAX_SOURCE_BYTES = 15 * 1024 * 1024;
 /** Pages (or slides) the document runner transcribes at most. It enforces its own copy. */
 export const MAX_SOURCE_PAGES = 75;
 
+/** Images a note can have. */
+export const MAX_ASSETS = 200;
+
+/** What a note's Markdown can call one of its images, as `asset:<name>`. */
+export const ASSET_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Bytes in any one file of a transcription: its Markdown, or an image. */
+export const MAX_RESULT_BYTES = 10 * 1024 * 1024;
+
+/** The type of an image a note can have, from its first bytes, or undefined if it isn't one. */
+export function imageTypeOf(bytes: Uint8Array) {
+  const has = (text: string, at = 0) =>
+    [...text].every((char, i) => bytes[at + i] === char.charCodeAt(0));
+  if (has("\x89PNG\r\n\x1a\n")) return "image/png";
+  if (has("\xff\xd8\xff")) return "image/jpeg";
+  if (has("GIF87a") || has("GIF89a")) return "image/gif";
+  if (has("RIFF") && has("WEBP", 8)) return "image/webp";
+  return undefined;
+}
+
 /** Files whose text is transcribed but not their images. */
 export function losesImages(kind: SourceKind | undefined) {
   return kind === "docx" || kind === "pptx";
