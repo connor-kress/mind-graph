@@ -30,7 +30,9 @@ type Props = {
 };
 
 const tabElementId = (id: string) => `note-tab-${id}`;
-const panelElementId = (sourceId?: Id<"sources">) => `note-panel-${sourceId ?? "files"}`;
+const panelElementId = (tabId: string) => `note-panel-${tabId}`;
+/** Apart from the tabs' own, as any tab's id can become a note's. */
+const FILES_PANEL_ID = "note-files-panel";
 
 /** Keeps a panel's place while it's out of sight, without laying it out. */
 const OUT_OF_SIGHT = "invisible [content-visibility:hidden]";
@@ -93,9 +95,10 @@ export function NoteTabs({
   const { tabs, activeId } = view;
   const active = tabs.find((tab) => tab.id === activeId) ?? tabs[0];
 
-  // A note loads the first time it's shown, then stays where it was left.
-  const [shown] = useState(() => new Set<Id<"sources">>());
-  if (active.sourceId) shown.add(active.sourceId);
+  // A note loads the first time its tab is shown, then stays where it was left. Each tab
+  // has a reader of its own, so that a note open twice can show two places in it.
+  const [shown] = useState(() => new Set<string>());
+  if (active.sourceId) shown.add(active.id);
 
   // Picking a tab, closing one or opening a note can remove what had focus.
   const focusActive = useRef(false);
@@ -210,9 +213,11 @@ export function NoteTabs({
                     aria-selected={selected}
                     // A note's panel only exists once it has been shown.
                     aria-controls={
-                      !tab.sourceId || shown.has(tab.sourceId)
-                        ? panelElementId(tab.sourceId)
-                        : undefined
+                      !tab.sourceId
+                        ? FILES_PANEL_ID
+                        : shown.has(tab.id)
+                          ? panelElementId(tab.id)
+                          : undefined
                     }
                     tabIndex={selected ? 0 : -1}
                     title={source ? `${source.title}\n${source.name}` : undefined}
@@ -302,7 +307,7 @@ export function NoteTabs({
         {/* Every Files tab shows the same list, so they can share it and its place. */}
         <div
           role="tabpanel"
-          id={panelElementId()}
+          id={FILES_PANEL_ID}
           aria-labelledby={tabElementId(active.id)}
           className={cn("absolute inset-0 flex flex-col", active.sourceId && OUT_OF_SIGHT)}
         >
@@ -317,13 +322,13 @@ export function NoteTabs({
         </div>
         {/* In an order of their own: moving one in the page would lose its place in the note. */}
         {tabs
-          .filter(({ sourceId }) => sourceId && shown.has(sourceId))
-          .sort((a, b) => a.sourceId!.localeCompare(b.sourceId!))
+          .filter(({ id, sourceId }) => sourceId && shown.has(id))
+          .sort((a, b) => a.id.localeCompare(b.id))
           .map(({ id, sourceId }) => (
             <div
-              key={sourceId}
+              key={id}
               role="tabpanel"
-              id={panelElementId(sourceId)}
+              id={panelElementId(id)}
               aria-labelledby={tabElementId(id)}
               className={cn(
                 "absolute inset-0 flex flex-col bg-background",
