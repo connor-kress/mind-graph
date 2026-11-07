@@ -28,6 +28,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "../components/ui/sidebar";
+import type { MapExportFormat } from "../editor/exportImage";
 import { LibraryTree, type Library, type LibraryTarget } from "./LibraryTree";
 import { CreateMapDialog } from "./CreateMapDialog";
 import { CreateProjectDialog } from "./CreateProjectDialog";
@@ -41,10 +42,18 @@ type Props = {
   activeTopicId?: Id<"topics">;
   onOpenMap: (id: Id<"topics">) => void;
   onDelete: (target: LibraryTarget, confirmation: string) => Promise<void>;
+  onExportMap: (map: { id: Id<"topics">; title: string }, format: MapExportFormat) => void;
   onError: (message: string) => void;
 };
 
-export function Sidebar({ library, activeTopicId, onOpenMap, onDelete, onError }: Props) {
+export function Sidebar({
+  library,
+  activeTopicId,
+  onOpenMap,
+  onDelete,
+  onExportMap,
+  onError,
+}: Props) {
   const { collapsed, setOpen } = useCollapsedProjects();
   const { setOpenMobile } = useSidebar();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -160,6 +169,7 @@ export function Sidebar({ library, activeTopicId, onOpenMap, onDelete, onError }
                 onDropMapFile={(id, file) => void importMapFile(id, file)}
                 onRename={startRename}
                 onDelete={setDeleting}
+                onExportMap={onExportMap}
                 onError={onError}
               />
             ) : (
