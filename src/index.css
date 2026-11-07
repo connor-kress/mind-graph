@@ -259,6 +259,27 @@ body {
   }
 }
 
+/*
+ * A title that runs to the edge of its tab or row and fades out instead of being cut off.
+ * A button that can show over its end takes up `--fading-title-room`, and while it's showing,
+ * `--fading-title-end` moves the fade in front of it. The padding is as much as the fade can
+ * cover, so a title that fits never fades. By default, the fade ends as far from the edge as
+ * a tab's title starts on the other side.
+ */
+.fading-title {
+  --fading-title-fade: 0.75rem;
+  min-width: 0;
+  padding-right: calc(var(--fading-title-room, 0px) + var(--fading-title-fade));
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+  mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - var(--fading-title-end, 0.625rem) - var(--fading-title-fade)),
+    transparent calc(100% - var(--fading-title-end, 0.625rem))
+  );
+}
+
 /* ---- Source notes ---- */
 
 /* The row of tabs fades out on any side with more tabs to scroll to, under the arrows there. */
@@ -269,24 +290,6 @@ body {
     #000 var(--note-tab-row-left, 0px),
     #000 calc(100% - var(--note-tab-row-right, 0px)),
     transparent calc(100% - var(--note-tab-row-right, 0px) / 2)
-  );
-}
-
-/*
- * A tab's title runs to the tab's edge and fades out instead of being cut off.
- * The padding is as much as the fade can cover, so a title that fits never fades.
- * By default it ends as far from the edge as the title starts on the other side.
- */
-.note-tab-title {
-  --note-tab-fade: 0.75rem;
-  min-width: 0;
-  padding-right: calc(1.5rem + var(--note-tab-fade));
-  overflow: hidden;
-  white-space: nowrap;
-  mask-image: linear-gradient(
-    to right,
-    #000 calc(100% - var(--note-tab-fade-end, 0.625rem) - var(--note-tab-fade)),
-    transparent calc(100% - var(--note-tab-fade-end, 0.625rem))
   );
 }
 
