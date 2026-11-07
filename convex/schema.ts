@@ -1,6 +1,13 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { linkValidator, mapKind, nodeFields, sourceKind, sourceStatus } from "./model";
+import {
+  linkValidator,
+  mapKind,
+  nodeFields,
+  noteTabValidator,
+  sourceKind,
+  sourceStatus,
+} from "./model";
 
 export default defineSchema({
   // Remember initialization even after the user deletes their whole library.
@@ -144,6 +151,14 @@ export default defineSchema({
   })
     .index("by_token", ["token"])
     .index("by_project", ["projectId"]),
+
+  // The tabs a member left open in the notes panel, remembered per map.
+  noteTabs: defineTable({
+    topicId: v.id("topics"),
+    userId: v.string(),
+    tabs: v.array(noteTabValidator),
+    activeId: v.string(),
+  }).index("by_topic_user", ["topicId", "userId"]),
 
   maps: defineTable({
     topicId: v.id("topics"),

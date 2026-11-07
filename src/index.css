@@ -261,6 +261,24 @@ body {
 
 /* ---- Source notes ---- */
 
+/*
+ * A tab's title runs to the tab's edge and fades out instead of being cut off.
+ * The padding is as much as the fade can cover, so a title that fits never fades.
+ * By default it ends as far from the edge as the title starts on the other side.
+ */
+.note-tab-title {
+  --note-tab-fade: 0.75rem;
+  min-width: 0;
+  padding-right: calc(1.5rem + var(--note-tab-fade));
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - var(--note-tab-fade-end, 0.625rem) - var(--note-tab-fade)),
+    transparent calc(100% - var(--note-tab-fade-end, 0.625rem))
+  );
+}
+
 /* Sizes are in em, so they follow the reader's chosen text size. */
 .note-markdown {
   @apply leading-[2] text-muted-foreground;

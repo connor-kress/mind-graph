@@ -146,6 +146,11 @@ async function deleteTopic(ctx: MutationCtx, topicId: Id<"topics">) {
     for (const node of nodes) await ctx.db.delete(node._id);
     await ctx.db.delete(map._id);
   }
+  const noteTabs = await ctx.db
+    .query("noteTabs")
+    .withIndex("by_topic_user", (q) => q.eq("topicId", topicId))
+    .collect();
+  for (const saved of noteTabs) await ctx.db.delete(saved._id);
   await ctx.db.delete(topicId);
 }
 
