@@ -16,6 +16,7 @@ import type * as mapFile from "../mapFile.js";
 import type * as migrations from "../migrations.js";
 import type * as model from "../model.js";
 import type * as nodes from "../nodes.js";
+import type * as noteTabs from "../noteTabs.js";
 import type * as projectMigration from "../projectMigration.js";
 import type * as runner from "../runner.js";
 import type * as seedData from "../seedData.js";
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   migrations: typeof migrations;
   model: typeof model;
   nodes: typeof nodes;
+  noteTabs: typeof noteTabs;
   projectMigration: typeof projectMigration;
   runner: typeof runner;
   seedData: typeof seedData;

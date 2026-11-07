@@ -91,6 +91,17 @@ export const MAX_SOURCE_NAME_LENGTH = 255;
 /** Matches file names, so a title taken from an uploaded file's name always fits. */
 export const MAX_SOURCE_TITLE_LENGTH = MAX_SOURCE_NAME_LENGTH;
 
+/** An open tab in the notes panel: a note, or without one, the project's files. */
+export const noteTabValidator = v.object({
+  id: v.string(),
+  sourceId: v.optional(v.id("sources")),
+});
+
+export type NoteTab = Infer<typeof noteTabValidator>;
+
+/** Tabs someone can have open at once on a map. */
+export const MAX_NOTE_TABS = 20;
+
 /**
  * A note's title from its file name, e.g. "Lecture_3 - cells.pdf" becomes
  * "Lecture 3 - cells". Falls back to the name as written if that leaves nothing.

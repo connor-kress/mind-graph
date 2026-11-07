@@ -1,36 +1,15 @@
 import { useMutation, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
-import { ChevronLeft, ExternalLink, Minus, Plus } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
+import { Skeleton } from "../components/ui/skeleton";
 import { Markdown } from "./Markdown";
 
-type Props = { sourceId: Id<"sources">; onClose: () => void };
+type Props = { sourceId: Id<"sources">; textSize: number };
 
 type Content = { url: string; text?: string; failed?: boolean };
-
-const TEXT_SIZE_STORAGE_KEY = "mind-graph:source-text-size";
-/** Reading sizes in pixels; 14 matches the rest of the panel. */
-const TEXT_SIZES = [12, 14, 16, 18, 20, 24];
-const DEFAULT_TEXT_SIZE = 14;
-
-/** The reader's text size, remembered across sources and visits. */
-function useTextSize() {
-  const [size, setSize] = useState(() => {
-    const stored = Number(localStorage.getItem(TEXT_SIZE_STORAGE_KEY));
-    return TEXT_SIZES.includes(stored) ? stored : DEFAULT_TEXT_SIZE;
-  });
-  useEffect(() => localStorage.setItem(TEXT_SIZE_STORAGE_KEY, String(size)), [size]);
-  const index = TEXT_SIZES.indexOf(size);
-  return {
-    size,
-    smaller: index > 0 ? () => setSize(TEXT_SIZES[index - 1]) : undefined,
-    larger: index < TEXT_SIZES.length - 1 ? () => setSize(TEXT_SIZES[index + 1]) : undefined,
-  };
-}
 
 /** The note's text at a URL. Stored files never change, so each is fetched once, unless it failed. */
 function useContent(url: string | null) {
@@ -62,21 +41,15 @@ function useContent(url: string | null) {
   return { content: content?.url === url ? content : null, reload };
 }
 
-/** A source's note, and a link to the original file it was transcribed from. */
-export function SourceReader({ sourceId, onClose }: Props) {
+/** A source's note, or why it can't be read yet. */
+export function SourceReader({ sourceId, textSize }: Props) {
   const source = useQuery(api.sources.open, { sourceId });
   const retry = useMutation(api.sources.retry);
   const [retryError, setRetryError] = useState<string | null>(null);
   const { content, reload } = useContent(source?.markdownUrl ?? null);
-  const text = useTextSize();
-
-  // Deleted, here or elsewhere.
-  useEffect(() => {
-    if (source === null) onClose();
-  }, [source, onClose]);
 
   let body;
-  if (!source) body = null;
+  if (!source) body = <Loading />;
   else if (source.status === "queued") body = <Message>Waiting to be transcribed…</Message>;
   else if (source.status === "processing") body = <Message>Transcribing…</Message>;
   else if (source.status === "failed") {
@@ -109,7 +82,7 @@ export function SourceReader({ sourceId, onClose }: Props) {
     );
   } else if (!source.markdownUrl) {
     body = <Message>Couldn't load the note.</Message>;
-  } else if (!content) body = null;
+  } else if (!content) body = <Loading />;
   else if (content.text === undefined) {
     body = (
       <Message>
@@ -127,7 +100,7 @@ export function SourceReader({ sourceId, onClose }: Props) {
   else {
     body = (
       <ScrollArea className="min-h-0 flex-1">
-        <div className="p-5" style={{ fontSize: text.size }}>
+        <div className="p-5" style={{ fontSize: textSize }}>
           {source.kind === "txt" ? (
             // Plain text isn't Markdown, so show it as written.
             <p className="leading-[2] whitespace-pre-wrap text-muted-foreground">{content.text}</p>
@@ -139,49 +112,17 @@ export function SourceReader({ sourceId, onClose }: Props) {
     );
   }
 
+  return body;
+}
+
+function Loading() {
   return (
-    <>
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
-        <Button variant="ghost" size="icon-xs" aria-label="Back to files" onClick={onClose}>
-          <ChevronLeft />
-        </Button>
-        <h3
-          className="min-w-0 flex-1 truncate text-xs font-medium"
-          title={source ? `${source.title}\n${source.name}` : undefined}
-        >
-          {source?.title}
-        </h3>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Smaller text"
-          title="Smaller text"
-          disabled={!text.smaller}
-          onClick={text.smaller}
-        >
-          <Minus />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Larger text"
-          title="Larger text"
-          disabled={!text.larger}
-          onClick={text.larger}
-        >
-          <Plus />
-        </Button>
-        {source?.originalUrl && (
-          <Button variant="ghost" size="xs" asChild>
-            <a href={source.originalUrl} target="_blank" rel="noreferrer">
-              Open original
-              <ExternalLink data-icon="inline-end" />
-            </a>
-          </Button>
-        )}
-      </div>
-      {body}
-    </>
+    <div role="status" aria-label="Loading note" className="space-y-3 p-5">
+      <Skeleton className="h-5 w-2/3" />
+      <Skeleton className="h-4 w-full" />
+      <Skeleton className="h-4 w-full" />
+      <Skeleton className="h-4 w-4/5" />
+    </div>
   );
 }
 

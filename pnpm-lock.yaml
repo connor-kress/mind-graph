@@ -29,6 +29,9 @@ importers:
       convex:
         specifier: ^1.47.0
         version: 1.47.0(@clerk/react@6.18.3(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react@19.3.1)
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
       html-to-image:
         specifier: 1.11.11
         version: 1.11.11
@@ -2069,6 +2072,9 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
+
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
 
   figures@6.1.0:
     resolution: {integrity: sha512-d+l3qxjSesT4V7v2fh+QnmFnUWv9lSpjarhShNTgBOfA0ttejbQUAlHLitbjkoRiDulW0OPoQPYIGhIC8ohejg==}
@@ -5135,6 +5141,8 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
+
+  fflate@0.8.3: {}
 
   figures@6.1.0:
     dependencies:
