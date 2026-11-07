@@ -28,7 +28,7 @@ export function NotesBar({ children, menu }: { children?: ReactNode; menu: React
   return (
     <div className="flex h-10 shrink-0 items-center border-b bg-muted/50">
       {children}
-      <div className="mx-1 ml-auto shrink-0 pl-1">{menu}</div>
+      <div className="ml-auto shrink-0 pr-2 pl-4">{menu}</div>
     </div>
   );
 }
